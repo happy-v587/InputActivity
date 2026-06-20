@@ -1,0 +1,10 @@
+node_modules/
+dist/
+release/
+.claude/
+.codex/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.DS_Store
+npm-debug.log*

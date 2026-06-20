@@ -1,0 +1,69 @@
+{
+  "name": "keyboard-activity-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local desktop tracker for keyboard and mouse activity.",
+  "main": "dist/src/main/main.js",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "dev:electron": "concurrently -k \"npm:dev\" \"tsc -w -p tsconfig.node.json\" \"wait-on tcp:5173 dist/src/main/main.js && VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "predev:electron": "npm run rebuild:native:electron",
+    "build": "tsc -p tsconfig.node.json && vite build",
+    "mac:dir": "npm run build && npm run rebuild:native:electron && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --dir",
+    "mac:dmg": "npm run build && npm run rebuild:native:electron && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg",
+    "rebuild:native": "npm run rebuild:native:electron",
+    "rebuild:native:electron": "electron-rebuild -f -w better-sqlite3 -w uiohook-napi",
+    "rebuild:native:node": "npm rebuild better-sqlite3",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit",
+    "pretest": "npm run rebuild:native:node",
+    "test": "vitest run",
+    "lint": "eslint . --ext .ts,.tsx"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.9.1",
+    "uiohook-napi": "^1.5.4",
+    "vite": "^6.0.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.4",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.0",
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "concurrently": "^9.1.0",
+    "electron": "^34.0.0",
+    "electron-builder": "^26.15.3",
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.keyboard.activity-tracker",
+    "productName": "Input Activity",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "asar": false,
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/uiohook-napi/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dir"
+      ],
+      "extendInfo": {
+        "LSUIElement": true
+      },
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "npmRebuild": false
+  }
+}

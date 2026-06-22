@@ -125,3 +125,25 @@ export interface SettingsPatch {
   idleThresholdMs?: number;
   segmentTailMs?: number;
 }
+
+export interface LlmConfig {
+  provider: 'openai' | 'anthropic';
+  baseUrl: string;
+  accessKey: string;
+  model: string;
+}
+
+export interface SavedChart {
+  id: string;
+  title: string;
+  sqlQuery: string;
+  chartType: 'bar' | 'line';
+  pinned: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type ChartQueryResult = {
+  columns: string[];
+  rows: Record<string, unknown>[];
+};

@@ -864,3 +864,180 @@ select {
     grid-template-columns: 1fr;
   }
 }
+
+/* Chat page */
+.chatPanel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.chatHint {
+  display: block;
+  margin-top: 3px;
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.chatBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chatMessages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--panel);
+  border-radius: 8px;
+}
+
+.chatMessage {
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  max-width: 85%;
+}
+
+.chat-user {
+  align-self: flex-end;
+  background: var(--accent);
+  color: var(--primary-text);
+}
+
+.chat-system {
+  align-self: flex-start;
+  background: var(--control-bg);
+  color: var(--text);
+}
+
+.chat-system code {
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.chatInputBar {
+  display: flex;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.chatInputBar textarea {
+  flex: 1;
+  resize: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.4;
+}
+
+.chatInputBar textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.chatResult {
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.chatActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  align-items: center;
+}
+
+.chartTitleInput {
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--control-bg);
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.chartTitleInput:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Pinned charts */
+.pinnedCharts {
+  margin-bottom: 16px;
+}
+
+#pinnedChartList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.pinnedChartCard {
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+}
+
+.pinnedChartHeader {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pinnedChartCard .bars {
+  height: 90px;
+  padding: 8px 0 2px;
+}
+
+.pinnedChartError {
+  color: var(--warn);
+  font-size: 12px;
+  padding: 12px 0;
+  text-align: center;
+}
+
+.pinnedChartCard .tinyButton {
+  margin-top: 8px;
+}
+
+/* Config inputs */
+.configInput {
+  min-width: 200px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--control-bg);
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.configInput:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+select.configInput {
+  cursor: pointer;
+}

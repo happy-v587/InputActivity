@@ -142,6 +142,34 @@ class TestStorePort implements EventStorePort {
   async getEventLog(page: number, pageSize: number): Promise<EventLogPage> {
     return this.store.getEventLog(page, pageSize);
   }
+
+  async executeQuery(): Promise<never> {
+    throw new Error('not implemented in test');
+  }
+
+  async getLlmConfig(): Promise<null> {
+    return null;
+  }
+
+  async setLlmConfig(): Promise<void> {
+    // no-op
+  }
+
+  async getSavedCharts(): Promise<[]> {
+    return [];
+  }
+
+  async saveChart(): Promise<void> {
+    // no-op
+  }
+
+  async deleteChart(): Promise<void> {
+    // no-op
+  }
+
+  async togglePinChart(): Promise<void> {
+    // no-op
+  }
 }
 
 function makeStore(): SqliteEventStore {

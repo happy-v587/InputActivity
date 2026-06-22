@@ -1,9 +1,12 @@
 import { EventEmitter } from 'node:events';
 import type {
   ActivitySummary,
+  ChartQueryResult,
   DimensionStats,
   EventLogPage,
+  LlmConfig,
   NormalizedInputEvent,
+  SavedChart,
   SettingsPatch,
   StatsDimension,
   TrackerConfig,
@@ -19,6 +22,13 @@ export interface EventStorePort {
   getSummary(config: TrackerConfig): Promise<ActivitySummary>;
   getDimensionStats(dimension: StatsDimension, config: TrackerConfig, now?: number, referenceTime?: number): Promise<DimensionStats>;
   getEventLog(page: number, pageSize: number): Promise<EventLogPage>;
+  executeQuery(sql: string): Promise<ChartQueryResult>;
+  getLlmConfig(): Promise<LlmConfig | null>;
+  setLlmConfig(config: LlmConfig): Promise<void>;
+  getSavedCharts(): Promise<SavedChart[]>;
+  saveChart(chart: SavedChart): Promise<void>;
+  deleteChart(id: string): Promise<void>;
+  togglePinChart(id: string): Promise<void>;
 }
 
 export class TrackingController extends EventEmitter {
@@ -125,6 +135,34 @@ export class TrackingController extends EventEmitter {
 
   getEventLog(page: number, pageSize: number): Promise<EventLogPage> {
     return this.store.getEventLog(page, pageSize);
+  }
+
+  executeQuery(sql: string): Promise<ChartQueryResult> {
+    return this.store.executeQuery(sql);
+  }
+
+  getLlmConfig(): Promise<LlmConfig | null> {
+    return this.store.getLlmConfig();
+  }
+
+  setLlmConfig(config: LlmConfig): Promise<void> {
+    return this.store.setLlmConfig(config);
+  }
+
+  getSavedCharts(): Promise<SavedChart[]> {
+    return this.store.getSavedCharts();
+  }
+
+  saveChart(chart: SavedChart): Promise<void> {
+    return this.store.saveChart(chart);
+  }
+
+  deleteChart(id: string): Promise<void> {
+    return this.store.deleteChart(id);
+  }
+
+  togglePinChart(id: string): Promise<void> {
+    return this.store.togglePinChart(id);
   }
 
   async emitSummary(): Promise<void> {

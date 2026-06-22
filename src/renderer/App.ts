@@ -5,6 +5,7 @@ import type {
   EventLogPage,
   EventLogItem,
   FrequencyItem,
+  LlmConfig,
   StatsDimension,
   ThemeChoice,
   TrackingState
@@ -29,6 +30,7 @@ root.innerHTML = `
 
       <nav class="tabs" role="tablist" aria-label="main pages">
         <button class="tab active" data-page="overview">Overview</button>
+        <button class="tab" data-page="chat">Chat</button>
         <button class="tab" data-page="events">Events</button>
         <button class="tab" data-page="config">Config</button>
       </nav>
@@ -68,6 +70,13 @@ root.innerHTML = `
               <strong id="wheels">0</strong>
             </article>
           </div>
+        </section>
+
+        <section class="pinnedCharts" id="pinnedCharts" aria-label="pinned charts" style="display:none">
+          <div class="panelHeader">
+            <span>Pinned Charts</span>
+          </div>
+          <div id="pinnedChartList"></div>
         </section>
 
         <section class="chartPanel" aria-label="activity pattern">
@@ -149,6 +158,32 @@ root.innerHTML = `
         </section>
       </section>
 
+      <section class="page" id="chatPage">
+        <section class="chatPanel" aria-label="chat query">
+          <div class="panelHeader">
+            <div>
+              <span>Chat</span>
+              <small class="chatHint">Describe what you want to see about your activity data</small>
+            </div>
+          </div>
+          <div class="chatBody">
+            <div class="chatMessages" id="chatMessages"></div>
+            <div class="chatResult" id="chatResult" style="display:none">
+              <div class="bars" id="chatBars"></div>
+              <div class="xAxis" id="chatXAxis"></div>
+              <div class="chatActions">
+                <input id="chartTitle" class="chartTitleInput" placeholder="Chart title..." />
+                <button id="saveChartBtn" class="smallButton">Save Chart</button>
+              </div>
+            </div>
+          </div>
+          <div class="chatInputBar">
+            <textarea id="chatInput" rows="2" placeholder="e.g. Show me my most active hours on Thursdays"></textarea>
+            <button id="sendChat" class="primaryAction">Send</button>
+          </div>
+        </section>
+      </section>
+
       <section class="page" id="configPage">
         <section class="configPanel" aria-label="configuration settings">
           <div class="panelHeader">
@@ -167,6 +202,28 @@ root.innerHTML = `
                 <option value="green">Green</option>
                 <option value="purple">Purple</option>
               </select>
+            </label>
+            <div class="settingRow">
+              <span>
+                <b>LLM Provider</b>
+                <small>Configure AI-powered data querying.</small>
+              </span>
+              <select id="llmProvider" class="configInput">
+                <option value="openai">OpenAI Compatible</option>
+                <option value="anthropic">Anthropic</option>
+              </select>
+            </div>
+            <label class="settingRow">
+              <span><b>Base URL</b></span>
+              <input id="llmBaseUrl" class="configInput" type="text" placeholder="https://api.openai.com/v1" />
+            </label>
+            <label class="settingRow">
+              <span><b>Access Key</b></span>
+              <input id="llmAccessKey" class="configInput" type="password" placeholder="sk-..." />
+            </label>
+            <label class="settingRow">
+              <span><b>Model</b></span>
+              <input id="llmModel" class="configInput" type="text" placeholder="gpt-4o" />
             </label>
           </div>
         </section>
@@ -210,6 +267,20 @@ const yearNav = getEl<HTMLDivElement>('yearNav');
 const yearLabel = getEl<HTMLElement>('yearLabel');
 const prevYear = getEl<HTMLButtonElement>('prevYear');
 const nextYear = getEl<HTMLButtonElement>('nextYear');
+const chatMessages = getEl<HTMLDivElement>('chatMessages');
+const chatInput = getEl<HTMLTextAreaElement>('chatInput');
+const sendChat = getEl<HTMLButtonElement>('sendChat');
+const chatResult = getEl<HTMLDivElement>('chatResult');
+const chatBars = getEl<HTMLDivElement>('chatBars');
+const chatXAxis = getEl<HTMLDivElement>('chatXAxis');
+const chartTitle = getEl<HTMLInputElement>('chartTitle');
+const saveChartBtn = getEl<HTMLButtonElement>('saveChartBtn');
+const pinnedCharts = getEl<HTMLDivElement>('pinnedCharts');
+const pinnedChartList = getEl<HTMLDivElement>('pinnedChartList');
+const llmProvider = getEl<HTMLSelectElement>('llmProvider');
+const llmBaseUrl = getEl<HTMLInputElement>('llmBaseUrl');
+const llmAccessKey = getEl<HTMLInputElement>('llmAccessKey');
+const llmModel = getEl<HTMLInputElement>('llmModel');
 
 let lastSummary: ActivitySummary | null = null;
 let selectedDimension: StatsDimension = 'minute';
@@ -295,6 +366,243 @@ window.tracker.onInput(() => {
   void refreshStats();
   void refreshEventLog();
 });
+
+void loadLlmConfig();
+
+sendChat.addEventListener('click', () => void handleChatQuery());
+chatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    void handleChatQuery();
+  }
+});
+saveChartBtn.addEventListener('click', () => void handleSaveChart());
+llmProvider.addEventListener('change', () => void saveLlmConfig());
+llmBaseUrl.addEventListener('change', () => void saveLlmConfig());
+llmAccessKey.addEventListener('change', () => void saveLlmConfig());
+llmModel.addEventListener('change', () => void saveLlmConfig());
+
+async function loadLlmConfig(): Promise<void> {
+  try {
+    const config = await window.tracker.getLlmConfig();
+    if (config) {
+      llmProvider.value = config.provider;
+      llmBaseUrl.value = config.baseUrl;
+      llmAccessKey.value = config.accessKey;
+      llmModel.value = config.model;
+    }
+  } catch {
+    // LLM config not set yet
+  }
+}
+
+async function saveLlmConfig(): Promise<void> {
+  await window.tracker.setLlmConfig({
+    provider: llmProvider.value as 'openai' | 'anthropic',
+    baseUrl: llmBaseUrl.value,
+    accessKey: llmAccessKey.value,
+    model: llmModel.value
+  });
+}
+
+let lastQueryResult: { columns: string[]; rows: Record<string, unknown>[] } | null = null;
+let lastQuerySql = '';
+
+async function handleChatQuery(): Promise<void> {
+  const query = chatInput.value.trim();
+  if (!query) {
+    return;
+  }
+
+  const config = await window.tracker.getLlmConfig();
+  if (!config || !config.accessKey) {
+    addChatMessage('system', 'Please configure LLM settings in the Config page first.');
+    return;
+  }
+
+  addChatMessage('user', query);
+  chatInput.value = '';
+  sendChat.disabled = true;
+  sendChat.textContent = 'Thinking...';
+
+  try {
+    const sql = await generateSqlFromLlm(query, config);
+    lastQuerySql = sql;
+    const result = await window.tracker.executeQuery(sql);
+    lastQueryResult = result;
+    addChatMessage('system', `Generated SQL: \`${sql}\``);
+    renderChatChart(result, sql);
+  } catch (error) {
+    addChatMessage('system', `Error: ${error instanceof Error ? error.message : String(error)}`);
+    chatResult.style.display = 'none';
+  } finally {
+    sendChat.disabled = false;
+    sendChat.textContent = 'Send';
+  }
+}
+
+async function generateSqlFromLlm(query: string, config: LlmConfig): Promise<string> {
+  const schemaPrompt = `You are a SQL generator for a SQLite database tracking keyboard and mouse activity.
+The database has the following tables:
+
+1. input_events - records every keyboard and mouse event
+   Columns: id(TEXT), ts(INTEGER - unix ms), type(TEXT - key_down/key_up/mouse_down/mouse_up/wheel), device(TEXT - keyboard/mouse), key_code(TEXT), key_label(TEXT), button(TEXT - left/right/middle), wheel_delta_x(REAL), wheel_delta_y(REAL), repeat(INTEGER 0/1), noise(INTEGER 0/1), source(TEXT), created_at(INTEGER)
+
+2. minute_stats - pre-aggregated per-minute stats
+   Columns: bucket_start(INTEGER - unix ms), key_down_count, mouse_click_count, wheel_count, active_ms, updated_at
+
+Generate ONLY a SQLite SQL query (SELECT or WITH only) for this request. Output ONLY the SQL, no markdown, no explanation, no code fences.
+Request: ${query}`;
+
+  let response: Response;
+  if (config.provider === 'anthropic') {
+    response = await fetch(`${config.baseUrl}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': config.accessKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: config.model, max_tokens: 1000, messages: [{ role: 'user', content: schemaPrompt }] })
+    });
+  } else {
+    response = await fetch(`${config.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.accessKey}` },
+      body: JSON.stringify({ model: config.model, messages: [{ role: 'user', content: schemaPrompt }], temperature: 0 })
+    });
+  }
+
+  if (!response.ok) {
+    throw new Error(`LLM API error: ${response.status} ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  let sql: string;
+  if (config.provider === 'anthropic') {
+    sql = data.content?.[0]?.text ?? '';
+  } else {
+    sql = data.choices?.[0]?.message?.content ?? '';
+  }
+
+  sql = sql.replace(/```sql\s*/gi, '').replace(/```/g, '').trim();
+
+  if (!sql.toUpperCase().startsWith('SELECT') && !sql.toUpperCase().startsWith('WITH')) {
+    throw new Error('LLM did not generate a valid SELECT query');
+  }
+
+  return sql;
+}
+
+function addChatMessage(role: 'user' | 'system', text: string): void {
+  const msg = document.createElement('div');
+  msg.className = `chatMessage chat-${role}`;
+  msg.innerHTML = text.replace(/\n/g, '<br>');
+  chatMessages.appendChild(msg);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function renderChatChart(result: { columns: string[]; rows: Record<string, unknown>[] }, sql: string): void {
+  const firstCol = result.columns[0];
+  const valueCol = result.columns.find((c) => c !== firstCol && typeof result.rows[0]?.[c] === 'number') ?? result.columns[1];
+  const values = result.rows.map((r) => Number(r[valueCol]) || 0);
+  const max = Math.max(1, ...values);
+  const totalCols = result.rows.length;
+
+  chatBars.innerHTML = '';
+  chatXAxis.innerHTML = '';
+  chatBars.style.gridTemplateColumns = `repeat(${Math.max(1, totalCols)}, minmax(4px, 1fr))`;
+  chatXAxis.style.gridTemplateColumns = chatBars.style.gridTemplateColumns;
+
+  for (const [index, row] of result.rows.entries()) {
+    const v = Number(row[valueCol]) || 0;
+    const height = Math.max(4, (v / max) * 96);
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    bar.style.setProperty('--bar-height', `${height}px`);
+    bar.title = `${String(row[firstCol])} - ${v} events`;
+    bar.innerHTML = `${v > 0 ? `<span class="barValue">${formatCount(v)}</span>` : ''}<i></i>`;
+    chatBars.appendChild(bar);
+
+    const label = document.createElement('span');
+    label.textContent = String(row[firstCol]);
+    label.title = String(row[firstCol]);
+    chatXAxis.appendChild(label);
+  }
+
+  chatResult.style.display = '';
+}
+
+async function handleSaveChart(): Promise<void> {
+  const title = chartTitle.value.trim();
+  if (!title || !lastQueryResult) {
+    return;
+  }
+  await window.tracker.saveChart({
+    id: crypto.randomUUID(),
+    title,
+    sqlQuery: lastQuerySql,
+    chartType: 'bar',
+    pinned: 0,
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  });
+  addChatMessage('system', `Chart "${title}" saved.`);
+  chartTitle.value = '';
+}
+
+async function renderPinnedCharts(): Promise<void> {
+  const charts = await window.tracker.getSavedCharts();
+  const pinned = charts.filter((c) => c.pinned);
+  if (pinned.length === 0) {
+    pinnedCharts.style.display = 'none';
+    return;
+  }
+  pinnedCharts.style.display = '';
+  pinnedChartList.innerHTML = '';
+
+  for (const chart of pinned) {
+    const card = document.createElement('div');
+    card.className = 'pinnedChartCard';
+    const header = document.createElement('div');
+    header.className = 'pinnedChartHeader';
+    header.innerHTML = `<span>${escapeHtml(chart.title)}</span>`;
+    card.appendChild(header);
+
+    try {
+      const result = await window.tracker.executeQuery(chart.sqlQuery);
+      const firstCol = result.columns[0];
+      const valueCol = result.columns.find((c) => c !== firstCol && typeof result.rows[0]?.[c] === 'number') ?? result.columns[1];
+      const values = result.rows.map((r) => Number(r[valueCol]) || 0);
+      const max = Math.max(1, ...values);
+      const body = document.createElement('div');
+      body.className = 'bars';
+      body.style.gridTemplateColumns = `repeat(${Math.max(1, result.rows.length)}, minmax(4px, 1fr))`;
+      for (const row of result.rows) {
+        const v = Number(row[valueCol]) || 0;
+        const h = Math.max(4, (v / max) * 70);
+        const b = document.createElement('div');
+        b.className = 'bar';
+        b.style.setProperty('--bar-height', `${h}px`);
+        b.title = `${String(row[firstCol])} - ${v}`;
+        b.innerHTML = '<i></i>';
+        body.appendChild(b);
+      }
+      card.appendChild(body);
+    } catch {
+      const err = document.createElement('div');
+      err.className = 'pinnedChartError';
+      err.textContent = 'Failed to load';
+      card.appendChild(err);
+    }
+
+    const unpin = document.createElement('button');
+    unpin.className = 'tinyButton';
+    unpin.textContent = 'Unpin';
+    unpin.addEventListener('click', async () => {
+      await window.tracker.togglePinChart(chart.id);
+      void renderPinnedCharts();
+    });
+    card.appendChild(unpin);
+    pinnedChartList.appendChild(card);
+  }
+}
 
 async function startOrResume(): Promise<void> {
   await runAction(async () => {
@@ -585,8 +893,12 @@ function switchPage(page: string): void {
     button.classList.toggle('active', button.dataset.page === page);
   }
   getEl<HTMLElement>('overviewPage').classList.toggle('active', page === 'overview');
+  getEl<HTMLElement>('chatPage').classList.toggle('active', page === 'chat');
   getEl<HTMLElement>('eventsPage').classList.toggle('active', page === 'events');
   getEl<HTMLElement>('configPage').classList.toggle('active', page === 'config');
+  if (page === 'overview') {
+    void renderPinnedCharts();
+  }
 }
 
 function formatRange(stats: DimensionStats): string {

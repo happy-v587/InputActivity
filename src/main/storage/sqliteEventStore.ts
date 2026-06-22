@@ -6,11 +6,14 @@ import type {
   ActivitySummary,
   AggregateBucket,
   ChartBucket,
+  ChartQueryResult,
   DimensionStats,
   EventLogItem,
   EventLogPage,
   FrequencyItem,
+  LlmConfig,
   NormalizedInputEvent,
+  SavedChart,
   StatsDimension,
   TrackerConfig
 } from '../../shared/types';
@@ -256,6 +259,21 @@ export class SqliteEventStore {
         active_ms INTEGER NOT NULL DEFAULT 0,
         updated_at INTEGER NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS llm_config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS saved_charts (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        sql_query TEXT NOT NULL,
+        chart_type TEXT NOT NULL DEFAULT 'bar',
+        pinned INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
     `);
     this.db.prepare('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (1, ?)').run(Date.now());
     this.cleanupRetention();
@@ -485,6 +503,52 @@ export class SqliteEventStore {
       const bucketStart = new Date(year, month, 1).getTime();
       return toChartBucket(bucketStart, `${year}/${monthLabel(month)}`, byMonth.get(bucketStart));
     });
+  }
+
+  executeQuery(sql: string): ChartQueryResult {
+    const trimmed = sql.trim().toUpperCase();
+    if (!trimmed.startsWith('SELECT') && !trimmed.startsWith('WITH')) {
+      throw new Error('Only SELECT and WITH queries are allowed');
+    }
+    const stmt = this.db.prepare(sql);
+    const rows = stmt.all() as Record<string, unknown>[];
+    const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
+    return { columns, rows };
+  }
+
+  getLlmConfig(): LlmConfig | null {
+    const row = this.db.prepare("SELECT value FROM llm_config WHERE key = 'llm_config'").get() as
+      | { value: string }
+      | undefined;
+    if (!row) return null;
+    return JSON.parse(row.value) as LlmConfig;
+  }
+
+  setLlmConfig(config: LlmConfig): void {
+    const value = JSON.stringify(config);
+    this.db.prepare("INSERT OR REPLACE INTO llm_config (key, value) VALUES ('llm_config', ?)").run(value);
+  }
+
+  getSavedCharts(): SavedChart[] {
+    return this.db
+      .prepare('SELECT id, title, sql_query, chart_type, pinned, created_at, updated_at FROM saved_charts ORDER BY updated_at DESC')
+      .all() as SavedChart[];
+  }
+
+  saveChart(chart: SavedChart): void {
+    this.db
+      .prepare(
+        'INSERT OR REPLACE INTO saved_charts (id, title, sql_query, chart_type, pinned, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      )
+      .run(chart.id, chart.title, chart.sqlQuery, chart.chartType, chart.pinned, chart.createdAt, chart.updatedAt);
+  }
+
+  deleteChart(id: string): void {
+    this.db.prepare('DELETE FROM saved_charts WHERE id = ?').run(id);
+  }
+
+  togglePinChart(id: string): void {
+    this.db.prepare('UPDATE saved_charts SET pinned = CASE WHEN pinned THEN 0 ELSE 1 END, updated_at = ? WHERE id = ?').run(Date.now(), id);
   }
 }
 

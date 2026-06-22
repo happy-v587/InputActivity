@@ -1,9 +1,12 @@
 import { Worker } from 'node:worker_threads';
 import type {
   ActivitySummary,
+  ChartQueryResult,
   DimensionStats,
   EventLogPage,
+  LlmConfig,
   NormalizedInputEvent,
+  SavedChart,
   StatsDimension,
   TrackerConfig
 } from '../../shared/types';
@@ -14,9 +17,16 @@ type WorkerRequest =
   | { id: number; type: 'close' }
   | { id: number; type: 'updateConfig'; payload: { config: TrackerConfig } }
   | { id: number; type: 'getSummary'; payload: { config: TrackerConfig; now?: number } }
-  | { id: number; type: 'getStats'; payload: { dimension: StatsDimension; config: TrackerConfig; now?: number } }
+  | { id: number; type: 'getStats'; payload: { dimension: StatsDimension; config: TrackerConfig; now?: number; referenceTime?: number } }
   | { id: number; type: 'getEventLog'; payload: { page: number; pageSize: number } }
-  | { id: number; type: 'recomputeAggregates'; payload: { start: number; end: number } };
+  | { id: number; type: 'recomputeAggregates'; payload: { start: number; end: number } }
+  | { id: number; type: 'executeQuery'; payload: { sql: string } }
+  | { id: number; type: 'getLlmConfig' }
+  | { id: number; type: 'setLlmConfig'; payload: { config: LlmConfig } }
+  | { id: number; type: 'getSavedCharts' }
+  | { id: number; type: 'saveChart'; payload: { chart: SavedChart } }
+  | { id: number; type: 'deleteChart'; payload: { id: string } }
+  | { id: number; type: 'togglePinChart'; payload: { id: string } };
 
 type WorkerResponse =
   | { id: number; ok: true; value: unknown }
@@ -60,8 +70,8 @@ export class AsyncEventStore {
     return this.request<ActivitySummary>({ id: 0, type: 'getSummary', payload: { config, now } });
   }
 
-  getDimensionStats(dimension: StatsDimension, config: TrackerConfig, now = Date.now()): Promise<DimensionStats> {
-    return this.request<DimensionStats>({ id: 0, type: 'getStats', payload: { dimension, config, now } });
+  getDimensionStats(dimension: StatsDimension, config: TrackerConfig, now?: number, referenceTime?: number): Promise<DimensionStats> {
+    return this.request<DimensionStats>({ id: 0, type: 'getStats', payload: { dimension, config, now, referenceTime } });
   }
 
   getEventLog(page: number, pageSize: number): Promise<EventLogPage> {
@@ -70,6 +80,34 @@ export class AsyncEventStore {
 
   recomputeAggregates(start: number, end: number): Promise<void> {
     return this.request<void>({ id: 0, type: 'recomputeAggregates', payload: { start, end } });
+  }
+
+  executeQuery(sql: string): Promise<ChartQueryResult> {
+    return this.request<ChartQueryResult>({ id: 0, type: 'executeQuery', payload: { sql } });
+  }
+
+  getLlmConfig(): Promise<LlmConfig | null> {
+    return this.request<LlmConfig | null>({ id: 0, type: 'getLlmConfig' });
+  }
+
+  setLlmConfig(config: LlmConfig): Promise<void> {
+    return this.request<void>({ id: 0, type: 'setLlmConfig', payload: { config } });
+  }
+
+  getSavedCharts(): Promise<SavedChart[]> {
+    return this.request<SavedChart[]>({ id: 0, type: 'getSavedCharts' });
+  }
+
+  saveChart(chart: SavedChart): Promise<void> {
+    return this.request<void>({ id: 0, type: 'saveChart', payload: { chart } });
+  }
+
+  deleteChart(id: string): Promise<void> {
+    return this.request<void>({ id: 0, type: 'deleteChart', payload: { id } });
+  }
+
+  togglePinChart(id: string): Promise<void> {
+    return this.request<void>({ id: 0, type: 'togglePinChart', payload: { id } });
   }
 
   private request<T>(request: WorkerRequest): Promise<T> {

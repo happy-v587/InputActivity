@@ -1,5 +1,5 @@
 import { parentPort, workerData } from 'node:worker_threads';
-import type { TrackerConfig } from '../../shared/types';
+import type { ChartQueryResult, LlmConfig, SavedChart, TrackerConfig } from '../../shared/types';
 import { SqliteEventStore } from './sqliteEventStore';
 
 if (!parentPort) {
@@ -38,11 +38,29 @@ function handleMessage(message: WorkerMessage): unknown {
     case 'getSummary':
       return store.getSummary(message.payload.config, message.payload.now);
     case 'getStats':
-      return store.getDimensionStats(message.payload.dimension, message.payload.config, message.payload.now);
+      return store.getDimensionStats(message.payload.dimension, message.payload.config, message.payload.now, message.payload.referenceTime);
     case 'getEventLog':
       return store.getEventLog(message.payload.page, message.payload.pageSize);
     case 'recomputeAggregates':
       store.recomputeAggregates(message.payload.start, message.payload.end);
+      return undefined;
+    case 'executeQuery':
+      return store.executeQuery(message.payload.sql);
+    case 'getLlmConfig':
+      return store.getLlmConfig();
+    case 'setLlmConfig':
+      store.setLlmConfig(message.payload.config);
+      return undefined;
+    case 'getSavedCharts':
+      return store.getSavedCharts();
+    case 'saveChart':
+      store.saveChart(message.payload.chart);
+      return undefined;
+    case 'deleteChart':
+      store.deleteChart(message.payload.id);
+      return undefined;
+    case 'togglePinChart':
+      store.togglePinChart(message.payload.id);
       return undefined;
     default:
       throw new Error(`Unknown worker message: ${(message as { type?: string }).type}`);
@@ -55,6 +73,13 @@ type WorkerMessage =
   | { id: number; type: 'close' }
   | { id: number; type: 'updateConfig'; payload: { config: TrackerConfig } }
   | { id: number; type: 'getSummary'; payload: { config: TrackerConfig; now?: number } }
-  | { id: number; type: 'getStats'; payload: { dimension: Parameters<SqliteEventStore['getDimensionStats']>[0]; config: TrackerConfig; now?: number } }
+  | { id: number; type: 'getStats'; payload: { dimension: Parameters<SqliteEventStore['getDimensionStats']>[0]; config: TrackerConfig; now?: number; referenceTime?: number } }
   | { id: number; type: 'getEventLog'; payload: { page: number; pageSize: number } }
-  | { id: number; type: 'recomputeAggregates'; payload: { start: number; end: number } };
+  | { id: number; type: 'recomputeAggregates'; payload: { start: number; end: number } }
+  | { id: number; type: 'executeQuery'; payload: { sql: string } }
+  | { id: number; type: 'getLlmConfig' }
+  | { id: number; type: 'setLlmConfig'; payload: { config: LlmConfig } }
+  | { id: number; type: 'getSavedCharts' }
+  | { id: number; type: 'saveChart'; payload: { chart: SavedChart } }
+  | { id: number; type: 'deleteChart'; payload: { id: string } }
+  | { id: number; type: 'togglePinChart'; payload: { id: string } };

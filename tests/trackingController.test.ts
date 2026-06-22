@@ -48,13 +48,44 @@ describe('TrackingController', () => {
     expect(events.map((item) => item.id)).toEqual(['active']);
     rawStore.close();
   });
+
+  it('reports blocked state when capture start fails', async () => {
+    const rawStore = makeStore();
+    const store = new TestStorePort(rawStore);
+    const adapter = new FakeAdapter({ ok: true }, new Error('Capture failed'));
+    const controller = new TrackingController(adapter, store, { ...defaultConfig, retentionDays: null });
+
+    await controller.start();
+
+    expect(controller.getState()).toBe('blocked');
+    expect((await controller.getSummary()).permissionMessage).toBe('Capture failed');
+    expect(adapter.started).toBe(false);
+    rawStore.close();
+  });
+
+  it('recomputes aggregates only for active-time settings', async () => {
+    const rawStore = makeStore();
+    const store = new TestStorePort(rawStore);
+    const adapter = new FakeAdapter({ ok: true });
+    const controller = new TrackingController(adapter, store, { ...defaultConfig, retentionDays: null });
+
+    await controller.updateSettings({ theme: 'blue' });
+    expect(store.recomputeCount).toBe(0);
+
+    await controller.updateSettings({ idleThresholdMs: 60_000 });
+    expect(store.recomputeCount).toBe(1);
+    rawStore.close();
+  });
 });
 
 class FakeAdapter extends EventEmitter implements InputCaptureAdapter {
   readonly source = 'fake';
   started = false;
 
-  constructor(private readonly permission: PermissionStatus) {
+  constructor(
+    private readonly permission: PermissionStatus,
+    private readonly startError?: Error
+  ) {
     super();
   }
 
@@ -63,6 +94,9 @@ class FakeAdapter extends EventEmitter implements InputCaptureAdapter {
   }
 
   async start(): Promise<void> {
+    if (this.startError) {
+      throw this.startError;
+    }
     this.started = true;
   }
 
@@ -76,6 +110,8 @@ class FakeAdapter extends EventEmitter implements InputCaptureAdapter {
 }
 
 class TestStorePort implements EventStorePort {
+  recomputeCount = 0;
+
   constructor(private readonly store: SqliteEventStore) {}
 
   async enqueue(event: NormalizedInputEvent): Promise<void> {
@@ -91,6 +127,7 @@ class TestStorePort implements EventStorePort {
   }
 
   async recomputeAggregates(start: number, end: number): Promise<void> {
+    this.recomputeCount += 1;
     this.store.recomputeAggregates(start, end);
   }
 

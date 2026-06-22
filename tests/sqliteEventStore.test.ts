@@ -77,6 +77,32 @@ describe('SqliteEventStore', () => {
     expect(stats.keyFrequencies[0]).toMatchObject({ label: 'J', count: 1 });
   });
 
+  it('returns month and year chart buckets', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'keyboard-store-'));
+    const dbPath = join(dir, 'activity.sqlite');
+    const store = new SqliteEventStore(dbPath, { ...defaultConfig, retentionDays: null });
+    const juneTs = new Date(2026, 5, 18, 9, 8, 7).getTime();
+    const januaryTs = new Date(2026, 0, 3, 10, 0, 0).getTime();
+    store.enqueue(event({ id: 'jun-key', ts: juneTs, type: 'key_down', keyCode: 'key:j', keyLabel: 'J' }));
+    store.enqueue(event({ id: 'jun-click', ts: juneTs + 1, type: 'mouse_down', button: 'left' }));
+    store.enqueue(event({ id: 'jan-wheel', ts: januaryTs, type: 'wheel', wheelDeltaY: 1 }));
+    store.flush();
+
+    const month = store.getDimensionStats('month', { ...defaultConfig, retentionDays: null }, juneTs);
+    const year = store.getDimensionStats('year', { ...defaultConfig, retentionDays: null }, juneTs);
+    store.close();
+
+    expect(month.rangeStart).toBe(new Date(2026, 5, 1).getTime());
+    expect(month.chartBuckets).toHaveLength(30);
+    expect(month.keyTotal).toBe(1);
+    expect(month.mouseTotal).toBe(1);
+    expect(month.chartBuckets[17]).toMatchObject({ label: '18', keyDownCount: 1, mouseClickCount: 1 });
+    expect(year.chartBuckets).toHaveLength(12);
+    expect(year.wheelTotal).toBe(1);
+    expect(year.chartBuckets[0]).toMatchObject({ label: '1月', wheelCount: 1 });
+    expect(year.chartBuckets[5]).toMatchObject({ label: '6月', keyDownCount: 1, mouseClickCount: 1 });
+  });
+
   it('returns event log rows with readable times and mouse wheel directions', () => {
     const dir = mkdtempSync(join(tmpdir(), 'keyboard-store-'));
     const dbPath = join(dir, 'activity.sqlite');

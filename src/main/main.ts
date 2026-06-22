@@ -31,6 +31,10 @@ async function createApp(): Promise<void> {
   bindController(controller);
   bindIpc(controller);
 
+  if (shouldStartTrackingOnLaunch()) {
+    void controller.start();
+  }
+
   app.on('before-quit', (event) => {
     if (shutdownStarted) {
       return;
@@ -46,6 +50,10 @@ async function createApp(): Promise<void> {
       app.quit();
     })();
   });
+}
+
+function shouldStartTrackingOnLaunch(): boolean {
+  return process.platform === 'darwin' && app.isPackaged;
 }
 
 function createWindow(): void {
@@ -105,14 +113,17 @@ function createTray(): void {
   tray.on('right-click', () => tray?.popUpContextMenu());
 }
 
-async function updateTrayMenu(state: TrackingState): Promise<void> {
+async function updateTrayMenu(state: TrackingState, knownSummary?: ActivitySummary): Promise<void> {
   if (!tray || !controller) {
     return;
   }
 
-  const summary = await controller.getSummary();
+  const summary = knownSummary ?? (await controller.getSummary());
   const label = `Today: ${summary.today.keyDownCount} keys / ${summary.today.mouseClickCount} clicks`;
-  tray.setTitle(state === 'active' ? '●' : '');
+  tray.setTitle(formatTrayTitle(summary));
+  tray.setToolTip(
+    `Input Activity\nToday: ${summary.today.keyDownCount} keys / ${summary.today.mouseClickCount} clicks`
+  );
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label, enabled: false },
@@ -135,6 +146,26 @@ async function updateTrayMenu(state: TrackingState): Promise<void> {
   );
 }
 
+function formatTrayTitle(summary: ActivitySummary): string {
+  return `${compactTrayCount(summary.today.keyDownCount)}/${compactTrayCount(summary.today.mouseClickCount)}`;
+}
+
+function compactTrayCount(value: number): string {
+  if (value < 1000) {
+    return String(value);
+  }
+
+  if (value < 10_000) {
+    return `${(value / 1000).toFixed(1)}k`;
+  }
+
+  if (value < 1_000_000) {
+    return `${Math.round(value / 1000)}k`;
+  }
+
+  return `${(value / 1_000_000).toFixed(1)}m`;
+}
+
 function toggleWindow(forceShow = false): void {
   if (!mainWindow) {
     return;
@@ -152,7 +183,7 @@ function toggleWindow(forceShow = false): void {
 function bindController(activeController: TrackingController): void {
   activeController.on('summary', (summary: ActivitySummary) => {
     mainWindow?.webContents.send('tracker:summary', summary);
-    void updateTrayMenu(summary.trackingState);
+    void updateTrayMenu(summary.trackingState, summary);
   });
   activeController.on('input', (event) => mainWindow?.webContents.send('tracker:input', event));
   activeController.on('state', (state: TrackingState, message?: string) => {

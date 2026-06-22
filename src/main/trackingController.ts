@@ -53,7 +53,13 @@ export class TrackingController extends EventEmitter {
       return this.state;
     }
 
-    await this.adapter.start();
+    try {
+      await this.adapter.start();
+    } catch (error) {
+      this.block(error instanceof Error ? error.message : String(error));
+      return this.state;
+    }
+
     this.setState('active');
     return this.state;
   }
@@ -86,18 +92,20 @@ export class TrackingController extends EventEmitter {
   }
 
   async updateSettings(patch: SettingsPatch): Promise<TrackerConfig> {
+    const shouldRecomputeAggregates = patch.idleThresholdMs !== undefined || patch.segmentTailMs !== undefined;
     this.config = {
       ...this.config,
       ...patch,
-      visualFeedbackIntensity: clamp(patch.visualFeedbackIntensity ?? this.config.visualFeedbackIntensity, 0, 1),
       idleThresholdMs: Math.max(30_000, patch.idleThresholdMs ?? this.config.idleThresholdMs),
       segmentTailMs: Math.max(0, patch.segmentTailMs ?? this.config.segmentTailMs)
     };
     await this.store.updateConfig(this.config);
     await this.store.flush();
-    const dayStart = new Date();
-    dayStart.setHours(0, 0, 0, 0);
-    await this.store.recomputeAggregates(dayStart.getTime(), dayStart.getTime() + 24 * 60 * 60 * 1000);
+    if (shouldRecomputeAggregates) {
+      const dayStart = new Date();
+      dayStart.setHours(0, 0, 0, 0);
+      await this.store.recomputeAggregates(dayStart.getTime(), dayStart.getTime() + 24 * 60 * 60 * 1000);
+    }
     void this.emitSummary();
     return this.config;
   }
@@ -107,9 +115,7 @@ export class TrackingController extends EventEmitter {
       ...(await this.store.getSummary(this.config)),
       trackingState: this.state,
       permissionMessage: this.blockedMessage,
-      visualFeedbackEnabled: this.config.visualFeedbackEnabled,
-      visualFeedbackIntensity: this.config.visualFeedbackIntensity,
-      lowPowerMode: this.config.lowPowerMode
+      theme: this.config.theme
     };
   }
 
@@ -188,8 +194,4 @@ export class TrackingController extends EventEmitter {
       }
     }
   }
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }

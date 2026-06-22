@@ -5,8 +5,8 @@ import type {
   EventLogPage,
   EventLogItem,
   FrequencyItem,
-  NormalizedInputEvent,
   StatsDimension,
+  ThemeChoice,
   TrackingState
 } from '../shared/types';
 
@@ -18,7 +18,6 @@ if (!root) {
 
 root.innerHTML = `
   <main class="shell">
-    <canvas class="effects" id="effects" width="1200" height="760"></canvas>
     <aside class="sidebar">
       <div class="brand">
         <span class="appMark" aria-hidden="true"></span>
@@ -81,9 +80,15 @@ root.innerHTML = `
               <button class="segment active" id="dimensionMinute" data-dimension="minute">Minute</button>
               <button class="segment" id="dimensionHour" data-dimension="hour">Hour</button>
               <button class="segment" id="dimensionDay" data-dimension="day">Day</button>
+              <button class="segment" id="dimensionMonth" data-dimension="month">Month</button>
+              <button class="segment" id="dimensionYear" data-dimension="year">Year</button>
             </div>
           </div>
-          <div class="bars" id="bars"></div>
+          <div class="chartBody">
+            <div class="bars" id="bars"></div>
+            <svg class="chartLine" id="chartLine" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+          </div>
+          <div class="xAxis" id="xAxis"></div>
         </section>
 
         <section class="detailPanel" aria-label="frequency details">
@@ -140,31 +145,23 @@ root.innerHTML = `
       </section>
 
       <section class="page" id="configPage">
-        <section class="configPanel" aria-label="visual settings">
+        <section class="configPanel" aria-label="configuration settings">
           <div class="panelHeader">
             <span>Config</span>
           </div>
           <div class="configGrid">
             <label class="settingRow">
               <span>
-                <b>Glow feedback</b>
-                <small>Show a soft pulse when keyboard or mouse input is captured.</small>
+                <b>Theme</b>
+                <small>Choose a light, dark, or colored interface theme.</small>
               </span>
-              <input id="effectsEnabled" type="checkbox" />
-            </label>
-            <label class="settingRow">
-              <span>
-                <b>Glow intensity</b>
-                <small>Control the brightness and spread of the input feedback.</small>
-              </span>
-              <input id="intensity" type="range" min="0" max="1" step="0.05" />
-            </label>
-            <label class="settingRow">
-              <span>
-                <b>Low power</b>
-                <small>Disable visual effects while keeping tracking and statistics running.</small>
-              </span>
-              <input id="lowPower" type="checkbox" />
+              <select id="themeSelect">
+                <option value="dark">Black</option>
+                <option value="light">White</option>
+                <option value="blue">Blue</option>
+                <option value="green">Green</option>
+                <option value="purple">Purple</option>
+              </select>
             </label>
           </div>
         </section>
@@ -186,6 +183,8 @@ const wheels = getEl<HTMLElement>('wheels');
 const active = getEl<HTMLElement>('active');
 const dayKey = getEl<HTMLElement>('dayKey');
 const bars = getEl<HTMLDivElement>('bars');
+const chartLine = getEl<SVGSVGElement>('chartLine');
+const xAxis = getEl<HTMLDivElement>('xAxis');
 const rangeLabel = getEl<HTMLElement>('rangeLabel');
 const statKeys = getEl<HTMLElement>('statKeys');
 const statMouse = getEl<HTMLElement>('statMouse');
@@ -201,11 +200,7 @@ const logPageLabel = getEl<HTMLElement>('logPageLabel');
 const prevLogPage = getEl<HTMLButtonElement>('prevLogPage');
 const nextLogPage = getEl<HTMLButtonElement>('nextLogPage');
 const permission = getEl<HTMLParagraphElement>('permission');
-const effectsEnabled = getEl<HTMLInputElement>('effectsEnabled');
-const intensity = getEl<HTMLInputElement>('intensity');
-const lowPower = getEl<HTMLInputElement>('lowPower');
-const canvas = getEl<HTMLCanvasElement>('effects');
-const ctx = canvas.getContext('2d');
+const themeSelect = getEl<HTMLSelectElement>('themeSelect');
 
 let lastSummary: ActivitySummary | null = null;
 let selectedDimension: StatsDimension = 'minute';
@@ -214,7 +209,8 @@ let wheelPage = 1;
 const wheelPageSize = 2;
 let eventLogPage = 1;
 const eventLogPageSize = 50;
-let particles: Particle[] = [];
+
+const themeStorageKey = 'input-activity-theme';
 
 startButton.addEventListener('click', () => void startOrResume());
 pauseButton.addEventListener('click', () => void runAction(() => window.tracker.pause()));
@@ -247,14 +243,11 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('.tab')) {
   });
 }
 
-effectsEnabled.addEventListener('change', () => {
-  void window.tracker.updateSettings({ visualFeedbackEnabled: effectsEnabled.checked });
-});
-intensity.addEventListener('input', () => {
-  void window.tracker.updateSettings({ visualFeedbackIntensity: Number(intensity.value) });
-});
-lowPower.addEventListener('change', () => {
-  void window.tracker.updateSettings({ lowPowerMode: lowPower.checked });
+themeSelect.addEventListener('change', () => {
+  const theme = themeSelect.value as ThemeChoice;
+  localStorage.setItem(themeStorageKey, theme);
+  applyTheme(theme);
+  void window.tracker.updateSettings({ theme });
 });
 
 for (const button of document.querySelectorAll<HTMLButtonElement>('.segment')) {
@@ -265,23 +258,24 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('.segment')) {
   });
 }
 
-void window.tracker.getSummary().then((summary) => {
-  renderSummary(summary);
+void window.tracker.getSummary().then(async (summary) => {
+  const savedTheme = readSavedTheme();
+  const resolvedSummary =
+    savedTheme && savedTheme !== summary.theme
+      ? await window.tracker.updateSettings({ theme: savedTheme })
+      : summary;
+
+  renderSummary(resolvedSummary);
   return Promise.all([refreshStats(), refreshEventLog()]);
 });
 window.tracker.onSummary(renderSummary);
 window.tracker.onTrackingState((state, message) => {
   renderState(state, message);
 });
-window.tracker.onInput((event) => {
-  if (lastSummary?.visualFeedbackEnabled && !lastSummary.lowPowerMode) {
-    burst(event, lastSummary.visualFeedbackIntensity);
-  }
+window.tracker.onInput(() => {
   void refreshStats();
   void refreshEventLog();
 });
-
-requestAnimationFrame(draw);
 
 async function startOrResume(): Promise<void> {
   await runAction(async () => {
@@ -309,9 +303,8 @@ function renderSummary(summary: ActivitySummary): void {
   wheels.textContent = formatCount(summary.today.wheelCount);
   active.textContent = formatDuration(summary.today.activeMs);
   dayKey.textContent = summary.today.dayKey;
-  effectsEnabled.checked = summary.visualFeedbackEnabled;
-  intensity.value = String(summary.visualFeedbackIntensity);
-  lowPower.checked = summary.lowPowerMode;
+  themeSelect.value = summary.theme;
+  applyTheme(summary.theme);
   renderState(summary.trackingState, summary.permissionMessage);
 }
 
@@ -344,6 +337,7 @@ function renderKeyboardHeatmap(target: HTMLElement, items: FrequencyItem[]): voi
   for (const row of keyboardLayout) {
     const rowElement = document.createElement('div');
     rowElement.className = 'keyboardRow';
+    rowElement.style.gridTemplateColumns = row.map((key) => `${keyboardKeyWeight(key)}fr`).join(' ');
 
     for (const key of row) {
       const count = counts.get(normalizeKeyLabel(key.label)) ?? 0;
@@ -363,6 +357,22 @@ function renderKeyboardHeatmap(target: HTMLElement, items: FrequencyItem[]): voi
   }
 
   target.appendChild(keyboard);
+}
+
+function keyboardKeyWeight(key: KeyboardKey): number {
+  if (key.size === 'space') {
+    return 8;
+  }
+
+  if (key.size === 'wider') {
+    return 1.8;
+  }
+
+  if (key.size === 'wide') {
+    return 1.35;
+  }
+
+  return 1;
 }
 
 function renderWheelFrequency(): void {
@@ -422,15 +432,15 @@ function renderState(state: TrackingState, message?: string): void {
 
 function renderBars(stats: DimensionStats): void {
   const buckets = stats.chartBuckets;
-  const max = Math.max(
-    1,
-    ...buckets.map((bucket) => bucket.keyDownCount + bucket.mouseClickCount + bucket.wheelCount)
-  );
+  const max = Math.max(1, ...buckets.map(bucketTotal));
   bars.innerHTML = '';
+  xAxis.innerHTML = '';
+  chartLine.innerHTML = '';
   bars.style.gridTemplateColumns = `repeat(${Math.max(1, buckets.length)}, minmax(4px, 1fr))`;
+  xAxis.style.gridTemplateColumns = bars.style.gridTemplateColumns;
 
-  for (const bucket of buckets) {
-    const total = bucket.keyDownCount + bucket.mouseClickCount + bucket.wheelCount;
+  buckets.forEach((bucket, index) => {
+    const total = bucketTotal(bucket);
     const height = Math.max(4, (total / max) * 96);
     const bar = document.createElement('div');
     bar.className = 'bar';
@@ -441,7 +451,69 @@ function renderBars(stats: DimensionStats): void {
       <i></i>
     `;
     bars.appendChild(bar);
+
+    const axisLabel = document.createElement('span');
+    axisLabel.textContent = shouldShowAxisLabel(index, buckets.length) ? bucket.label : '';
+    axisLabel.title = bucket.label;
+    xAxis.appendChild(axisLabel);
+  });
+
+  renderChartLine(buckets, max);
+}
+
+function renderChartLine(buckets: DimensionStats['chartBuckets'], max: number): void {
+  if (buckets.length === 0) {
+    return;
   }
+
+  const points = buckets
+    .map((bucket, index) => {
+      const x = buckets.length === 1 ? 50 : (index / (buckets.length - 1)) * 100;
+      const y = 98 - (bucketTotal(bucket) / max) * 92;
+      return `${x.toFixed(3)},${y.toFixed(3)}`;
+    })
+    .join(' ');
+
+  const circles = buckets
+    .map((bucket, index) => {
+      const total = bucketTotal(bucket);
+      if (total <= 0) {
+        return '';
+      }
+      const x = buckets.length === 1 ? 50 : (index / (buckets.length - 1)) * 100;
+      const y = 98 - (total / max) * 92;
+      return `<circle cx="${x.toFixed(3)}" cy="${y.toFixed(3)}" r="1.35"></circle>`;
+    })
+    .join('');
+
+  chartLine.innerHTML = `
+    <polyline points="${points}"></polyline>
+    ${circles}
+  `;
+}
+
+function bucketTotal(bucket: DimensionStats['chartBuckets'][number]): number {
+  return bucket.keyDownCount + bucket.mouseClickCount + bucket.wheelCount;
+}
+
+function shouldShowAxisLabel(index: number, total: number): boolean {
+  if (total <= 12) {
+    return true;
+  }
+
+  if (index === 0 || index === total - 1) {
+    return true;
+  }
+
+  if (total <= 24) {
+    return index % 3 === 0;
+  }
+
+  if (total <= 31) {
+    return index % 5 === 0;
+  }
+
+  return index % 10 === 0;
 }
 
 function renderFrequencyList(
@@ -496,6 +568,14 @@ function formatRange(stats: DimensionStats): string {
     ).padStart(2, '0')}`;
   }
 
+  if (stats.dimension === 'month') {
+    return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  if (stats.dimension === 'year') {
+    return String(start.getFullYear());
+  }
+
   const end = new Date(stats.rangeEnd);
   return `${formatTime(start)}-${formatTime(end)}`;
 }
@@ -509,6 +589,18 @@ function formatBucketUnit(dimension: StatsDimension): string {
     return 'minutes';
   }
 
+  if (dimension === 'day') {
+    return 'hours';
+  }
+
+  if (dimension === 'month') {
+    return 'days';
+  }
+
+  if (dimension === 'year') {
+    return 'months';
+  }
+
   return 'hours';
 }
 
@@ -516,59 +608,17 @@ function formatTime(date: Date): string {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
-function burst(event: NormalizedInputEvent, level: number): void {
-  const count = Math.round(5 + level * 14);
-  const palette =
-    event.device === 'keyboard'
-      ? ['rgba(122, 183, 255, 0.36)', 'rgba(98, 214, 142, 0.34)']
-      : event.type === 'wheel'
-        ? ['rgba(242, 193, 92, 0.34)', 'rgba(98, 214, 142, 0.28)']
-        : ['rgba(242, 193, 92, 0.32)', 'rgba(122, 183, 255, 0.28)'];
-
-  for (let index = 0; index < count; index += 1) {
-    const angle = Math.random() * Math.PI * 2;
-    const speed = 0.9 + Math.random() * 3.4 * level;
-    particles.push({
-      x: canvas.width / 2 + (Math.random() - 0.5) * 48,
-      y: canvas.height / 2 + (Math.random() - 0.5) * 48,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
-      life: 18 + Math.random() * 18,
-      size: 2 + Math.random() * 5 * level,
-      color: palette[index % palette.length]
-    });
-  }
-
-  particles = particles.slice(-140);
+function applyTheme(theme: ThemeChoice): void {
+  document.documentElement.dataset.theme = theme;
 }
 
-function draw(): void {
-  if (!ctx) {
-    return;
-  }
+function readSavedTheme(): ThemeChoice | null {
+  const value = localStorage.getItem(themeStorageKey);
+  return isThemeChoice(value) ? value : null;
+}
 
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  particles = particles
-    .map((particle) => ({
-      ...particle,
-      x: particle.x + particle.vx,
-      y: particle.y + particle.vy,
-      vx: particle.vx * 0.96,
-      vy: particle.vy * 0.96,
-      life: particle.life - 1
-    }))
-    .filter((particle) => particle.life > 0);
-
-  for (const particle of particles) {
-    ctx.globalAlpha = Math.max(0, particle.life / 48);
-    ctx.fillStyle = particle.color;
-    ctx.beginPath();
-    ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
-
-  requestAnimationFrame(draw);
+function isThemeChoice(value: string | null): value is ThemeChoice {
+  return value === 'dark' || value === 'light' || value === 'blue' || value === 'green' || value === 'purple';
 }
 
 function formatDuration(ms: number): string {
@@ -633,12 +683,12 @@ function normalizeKeyLabel(label: string): string {
   return aliases[normalized] ?? normalized;
 }
 
-function getEl<T extends HTMLElement>(id: string): T {
+function getEl<T extends Element>(id: string): T {
   const element = document.getElementById(id);
   if (!element) {
     throw new Error(`Missing element #${id}`);
   }
-  return element as T;
+  return element as unknown as T;
 }
 
 type KeyboardKey = {
@@ -709,13 +759,3 @@ const keyboardLayout: KeyboardKey[][] = [
     { label: 'Right' }
   ]
 ];
-
-interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  life: number;
-  size: number;
-  color: string;
-}

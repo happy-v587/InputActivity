@@ -1,0 +1,114 @@
+name: Release Builds
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            os: macos-latest
+            platform: mac
+            arch: arm64
+            targets: dmg zip
+          - name: macos-x64
+            os: macos-15-intel
+            platform: mac
+            arch: x64
+            targets: dmg zip
+          - name: windows-x64
+            os: windows-latest
+            platform: win
+            arch: x64
+            targets: nsis zip
+          - name: linux-x64
+            os: ubuntu-latest
+            platform: linux
+            arch: x64
+            targets: AppImage deb tar.gz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxkbfile-dev libxkbcommon-dev libxtst-dev
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build renderer and main process
+        run: npm run build
+
+      - name: Rebuild native modules for Electron
+        run: npm run rebuild:native:electron
+
+      - name: Package desktop app
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        shell: bash
+        run: |
+          npx electron-builder --${{ matrix.platform }} ${{ matrix.targets }} --${{ matrix.arch }} --publish never
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: input-activity-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            release/*.AppImage
+            release/*.deb
+            release/*.dmg
+            release/*.exe
+            release/*.tar.gz
+            release/*.zip
+
+      - name: Upload files to GitHub Release
+        if: github.event_name == 'release'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=(
+            release/*.AppImage
+            release/*.deb
+            release/*.dmg
+            release/*.exe
+            release/*.tar.gz
+            release/*.zip
+          )
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No release assets found."
+            exit 1
+          fi
+          gh release upload "${{ github.event.release.tag_name }}" "${files[@]}" --clobber

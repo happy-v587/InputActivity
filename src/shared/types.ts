@@ -13,7 +13,9 @@ export type WheelDirection = 'up' | 'down' | 'left' | 'right' | 'unknown';
 
 export type TrackingState = 'stopped' | 'active' | 'paused' | 'blocked';
 
-export type StatsDimension = 'minute' | 'hour' | 'day';
+export type StatsDimension = 'minute' | 'hour' | 'day' | 'month' | 'year';
+
+export type ThemeChoice = 'dark' | 'light' | 'blue' | 'green' | 'purple';
 
 export interface NormalizedInputEvent {
   id: string;
@@ -51,9 +53,7 @@ export interface ActivitySummary {
   permissionMessage?: string;
   today: DaySummary;
   hourly: HourlyBucket[];
-  visualFeedbackEnabled: boolean;
-  visualFeedbackIntensity: number;
-  lowPowerMode: boolean;
+  theme: ThemeChoice;
 }
 
 export interface FrequencyItem {
@@ -105,9 +105,7 @@ export interface TrackerConfig {
   flushIntervalMs: number;
   batchSize: number;
   retentionDays: number | null;
-  visualFeedbackEnabled: boolean;
-  visualFeedbackIntensity: number;
-  lowPowerMode: boolean;
+  theme: ThemeChoice;
   timezone: 'local';
 }
 
@@ -123,9 +121,7 @@ export type RendererEvent =
   | { type: 'tracking-state'; state: TrackingState; message?: string };
 
 export interface SettingsPatch {
-  visualFeedbackEnabled?: boolean;
-  visualFeedbackIntensity?: number;
-  lowPowerMode?: boolean;
+  theme?: ThemeChoice;
   idleThresholdMs?: number;
   segmentTailMs?: number;
 }

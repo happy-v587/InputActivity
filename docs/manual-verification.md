@@ -10,13 +10,11 @@ Use this checklist after installing dependencies and launching the Electron app.
 - Select Pause and verify the state indicator changes to Paused and counters stop changing.
 - Select Stop and verify the state indicator changes to Stopped.
 
-## Visual feedback
+## Theme settings
 
-- Enable Visual feedback and set Intensity above 0.5.
-- Press keyboard keys and verify short colorful bursts appear.
-- Click or scroll the mouse and verify mouse-triggered bursts appear.
-- Disable Visual feedback and verify counters still update while bursts stop.
-- Enable Low power and verify tracking continues while expensive visual effects are suppressed.
+- Open Config and switch between Black, White, Blue, Green, and Purple.
+- Verify the selected theme applies immediately.
+- Restart the app and verify the last selected theme is restored.
 
 ## Permission handling
 

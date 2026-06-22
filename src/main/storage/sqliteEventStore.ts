@@ -121,9 +121,7 @@ export class SqliteEventStore {
       trackingState: 'stopped',
       today,
       hourly,
-      visualFeedbackEnabled: config.visualFeedbackEnabled,
-      visualFeedbackIntensity: config.visualFeedbackIntensity,
-      lowPowerMode: config.lowPowerMode
+      theme: config.theme
     };
   }
 
@@ -445,17 +443,46 @@ export class SqliteEventStore {
 
     const hourly = aggregateHourlyBuckets(this.getMinuteBuckets(rangeStart, rangeEnd));
     const byHour = new Map(hourly.map((bucket) => [bucket.hour, bucket]));
-    return Array.from({ length: 24 }, (_, hour) => {
-      const bucketStart = rangeStart + hour * 60 * 60 * 1000;
-      const found = byHour.get(hour);
-      return {
-        bucketStart,
-        label: `${String(hour).padStart(2, '0')}:00`,
-        keyDownCount: found?.keyDownCount ?? 0,
-        mouseClickCount: found?.mouseClickCount ?? 0,
-        wheelCount: found?.wheelCount ?? 0,
-        activeMs: found?.activeMs ?? 0
-      };
+    if (dimension === 'day') {
+      return Array.from({ length: 24 }, (_, hour) => {
+        const bucketStart = rangeStart + hour * 60 * 60 * 1000;
+        const found = byHour.get(hour);
+        return toChartBucket(bucketStart, `${String(hour).padStart(2, '0')}:00`, found);
+      });
+    }
+
+    if (dimension === 'month') {
+      const byDay = new Map<number, AggregateBucket>();
+      for (const minuteBucket of this.getMinuteBuckets(rangeStart, rangeEnd)) {
+        const bucketStart = startOfLocalDay(minuteBucket.bucketStart);
+        const aggregate = byDay.get(bucketStart) ?? emptyAggregateBucket(bucketStart);
+        addAggregateBucket(aggregate, minuteBucket);
+        byDay.set(bucketStart, aggregate);
+      }
+
+      const buckets: ChartBucket[] = [];
+      const cursor = new Date(rangeStart);
+      while (cursor.getTime() < rangeEnd) {
+        const bucketStart = cursor.getTime();
+        buckets.push(toChartBucket(bucketStart, String(cursor.getDate()), byDay.get(bucketStart)));
+        cursor.setDate(cursor.getDate() + 1);
+      }
+
+      return buckets;
+    }
+
+    const byMonth = new Map<number, AggregateBucket>();
+    for (const minuteBucket of this.getMinuteBuckets(rangeStart, rangeEnd)) {
+      const bucketStart = startOfLocalMonth(minuteBucket.bucketStart);
+      const aggregate = byMonth.get(bucketStart) ?? emptyAggregateBucket(bucketStart);
+      addAggregateBucket(aggregate, minuteBucket);
+      byMonth.set(bucketStart, aggregate);
+    }
+
+    const year = new Date(rangeStart).getFullYear();
+    return Array.from({ length: 12 }, (_, month) => {
+      const bucketStart = new Date(year, month, 1).getTime();
+      return toChartBucket(bucketStart, monthLabel(month), byMonth.get(bucketStart));
     });
   }
 }
@@ -479,6 +506,52 @@ interface FrequencyRow {
   id: string;
   label: string;
   count: number;
+}
+
+function emptyAggregateBucket(bucketStart: number): AggregateBucket {
+  return {
+    bucketStart,
+    keyDownCount: 0,
+    mouseClickCount: 0,
+    wheelCount: 0,
+    activeMs: 0
+  };
+}
+
+function addAggregateBucket(target: AggregateBucket, source: AggregateBucket): void {
+  target.keyDownCount += source.keyDownCount;
+  target.mouseClickCount += source.mouseClickCount;
+  target.wheelCount += source.wheelCount;
+  target.activeMs += source.activeMs;
+}
+
+function toChartBucket(bucketStart: number, label: string, bucket?: AggregateBucket): ChartBucket {
+  return {
+    bucketStart,
+    label,
+    keyDownCount: bucket?.keyDownCount ?? 0,
+    mouseClickCount: bucket?.mouseClickCount ?? 0,
+    wheelCount: bucket?.wheelCount ?? 0,
+    activeMs: bucket?.activeMs ?? 0
+  };
+}
+
+function startOfLocalMonth(ts: number): number {
+  const date = new Date(ts);
+  date.setDate(1);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function startOfLocalYear(ts: number): number {
+  const date = new Date(ts);
+  date.setMonth(0, 1);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function monthLabel(month: number): string {
+  return `${month + 1}月`;
 }
 
 function rowToEvent(row: EventRow): NormalizedInputEvent {
@@ -542,6 +615,20 @@ function getDimensionRange(dimension: StatsDimension, now: number): [number, num
     date.setMinutes(0, 0, 0);
     const start = date.getTime();
     return [start, start + 60 * 60 * 1000];
+  }
+
+  if (dimension === 'month') {
+    const start = startOfLocalMonth(now);
+    const end = new Date(start);
+    end.setMonth(end.getMonth() + 1);
+    return [start, end.getTime()];
+  }
+
+  if (dimension === 'year') {
+    const start = startOfLocalYear(now);
+    const end = new Date(start);
+    end.setFullYear(end.getFullYear() + 1);
+    return [start, end.getTime()];
   }
 
   const start = startOfLocalDay(now);

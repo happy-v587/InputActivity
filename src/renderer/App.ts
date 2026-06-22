@@ -83,6 +83,11 @@ root.innerHTML = `
               <button class="segment" id="dimensionMonth" data-dimension="month">Month</button>
               <button class="segment" id="dimensionYear" data-dimension="year">Year</button>
             </div>
+            <div class="yearNav" id="yearNav" style="display:none">
+              <button id="prevYear" class="tinyButton" title="Previous year">◀</button>
+              <span id="yearLabel"></span>
+              <button id="nextYear" class="tinyButton" title="Next year">▶</button>
+            </div>
           </div>
           <div class="chartBody">
             <div class="bars" id="bars"></div>
@@ -201,9 +206,14 @@ const prevLogPage = getEl<HTMLButtonElement>('prevLogPage');
 const nextLogPage = getEl<HTMLButtonElement>('nextLogPage');
 const permission = getEl<HTMLParagraphElement>('permission');
 const themeSelect = getEl<HTMLSelectElement>('themeSelect');
+const yearNav = getEl<HTMLDivElement>('yearNav');
+const yearLabel = getEl<HTMLElement>('yearLabel');
+const prevYear = getEl<HTMLButtonElement>('prevYear');
+const nextYear = getEl<HTMLButtonElement>('nextYear');
 
 let lastSummary: ActivitySummary | null = null;
 let selectedDimension: StatsDimension = 'minute';
+let selectedYear: number = new Date().getFullYear();
 let latestWheelItems: FrequencyItem[] = [];
 let wheelPage = 1;
 const wheelPageSize = 2;
@@ -258,6 +268,15 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('.segment')) {
   });
 }
 
+prevYear.addEventListener('click', () => {
+  selectedYear -= 1;
+  void refreshStats();
+});
+nextYear.addEventListener('click', () => {
+  selectedYear += 1;
+  void refreshStats();
+});
+
 void window.tracker.getSummary().then(async (summary) => {
   const savedTheme = readSavedTheme();
   const resolvedSummary =
@@ -309,7 +328,9 @@ function renderSummary(summary: ActivitySummary): void {
 }
 
 async function refreshStats(): Promise<void> {
-  const stats = await window.tracker.getStats(selectedDimension);
+  const referenceTime =
+    selectedDimension === 'year' ? new Date(selectedYear, 0, 1).getTime() : undefined;
+  const stats = await window.tracker.getStats(selectedDimension, referenceTime);
   renderStats(stats);
 }
 
@@ -548,6 +569,14 @@ function renderFrequencyList(
 function updateDimensionButtons(): void {
   for (const button of document.querySelectorAll<HTMLButtonElement>('.segment')) {
     button.classList.toggle('active', button.dataset.dimension === selectedDimension);
+  }
+  if (selectedDimension === 'year') {
+    yearNav.style.display = '';
+    yearLabel.textContent = String(selectedYear);
+    const now = new Date();
+    nextYear.disabled = selectedYear >= now.getFullYear();
+  } else {
+    yearNav.style.display = 'none';
   }
 }
 

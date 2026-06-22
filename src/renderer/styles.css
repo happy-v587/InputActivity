@@ -456,6 +456,20 @@ h1 {
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
 }
 
+.yearNav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.yearNav span {
+  min-width: 48px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text);
+}
+
 .chartBody {
   position: relative;
   min-width: 0;

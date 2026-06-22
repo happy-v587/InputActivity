@@ -11,8 +11,8 @@ import type {
 
 const api = {
   getSummary: (): Promise<ActivitySummary> => ipcRenderer.invoke('tracker:get-summary'),
-  getStats: (dimension: StatsDimension): Promise<DimensionStats> =>
-    ipcRenderer.invoke('tracker:get-stats', dimension),
+  getStats: (dimension: StatsDimension, referenceTime?: number): Promise<DimensionStats> =>
+    ipcRenderer.invoke('tracker:get-stats', dimension, referenceTime),
   getEventLog: (page = 1, pageSize = 50): Promise<EventLogPage> =>
     ipcRenderer.invoke('tracker:get-event-log', page, pageSize),
   start: (): Promise<TrackingState> => ipcRenderer.invoke('tracker:start'),

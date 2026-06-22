@@ -194,8 +194,8 @@ function bindController(activeController: TrackingController): void {
 
 function bindIpc(activeController: TrackingController): void {
   ipcMain.handle('tracker:get-summary', () => activeController.getSummary());
-  ipcMain.handle('tracker:get-stats', (_event, dimension: StatsDimension) =>
-    activeController.getStats(dimension)
+  ipcMain.handle('tracker:get-stats', (_event, dimension: StatsDimension, referenceTime?: number) =>
+    activeController.getStats(dimension, referenceTime)
   );
   ipcMain.handle('tracker:get-event-log', (_event, page: number, pageSize: number) =>
     activeController.getEventLog(page, pageSize)

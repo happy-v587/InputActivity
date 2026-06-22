@@ -17,7 +17,7 @@ export interface EventStorePort {
   updateConfig(config: TrackerConfig): Promise<void>;
   recomputeAggregates(start: number, end: number): Promise<void>;
   getSummary(config: TrackerConfig): Promise<ActivitySummary>;
-  getDimensionStats(dimension: StatsDimension, config: TrackerConfig): Promise<DimensionStats>;
+  getDimensionStats(dimension: StatsDimension, config: TrackerConfig, now?: number, referenceTime?: number): Promise<DimensionStats>;
   getEventLog(page: number, pageSize: number): Promise<EventLogPage>;
 }
 
@@ -119,8 +119,8 @@ export class TrackingController extends EventEmitter {
     };
   }
 
-  getStats(dimension: StatsDimension): Promise<DimensionStats> {
-    return this.store.getDimensionStats(dimension, this.config);
+  getStats(dimension: StatsDimension, referenceTime?: number): Promise<DimensionStats> {
+    return this.store.getDimensionStats(dimension, this.config, Date.now(), referenceTime);
   }
 
   getEventLog(page: number, pageSize: number): Promise<EventLogPage> {

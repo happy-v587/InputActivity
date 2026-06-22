@@ -125,9 +125,9 @@ export class SqliteEventStore {
     };
   }
 
-  getDimensionStats(dimension: StatsDimension, config: TrackerConfig, now = Date.now()): DimensionStats {
+  getDimensionStats(dimension: StatsDimension, config: TrackerConfig, now = Date.now(), referenceTime?: number): DimensionStats {
     this.flush();
-    const [rangeStart, rangeEnd] = getDimensionRange(dimension, now);
+    const [rangeStart, rangeEnd] = getDimensionRange(dimension, now, referenceTime);
     const events = this.getEvents(rangeStart, rangeEnd);
     const activeMs = estimateActiveMs(events, config);
     const keyRows = this.getKeyFrequencyRows(rangeStart, rangeEnd);
@@ -462,9 +462,10 @@ export class SqliteEventStore {
 
       const buckets: ChartBucket[] = [];
       const cursor = new Date(rangeStart);
+      const month = cursor.getMonth() + 1;
       while (cursor.getTime() < rangeEnd) {
         const bucketStart = cursor.getTime();
-        buckets.push(toChartBucket(bucketStart, String(cursor.getDate()), byDay.get(bucketStart)));
+        buckets.push(toChartBucket(bucketStart, `${month}/${cursor.getDate()}`, byDay.get(bucketStart)));
         cursor.setDate(cursor.getDate() + 1);
       }
 
@@ -482,7 +483,7 @@ export class SqliteEventStore {
     const year = new Date(rangeStart).getFullYear();
     return Array.from({ length: 12 }, (_, month) => {
       const bucketStart = new Date(year, month, 1).getTime();
-      return toChartBucket(bucketStart, monthLabel(month), byMonth.get(bucketStart));
+      return toChartBucket(bucketStart, `${year}/${monthLabel(month)}`, byMonth.get(bucketStart));
     });
   }
 }
@@ -603,8 +604,9 @@ function fillHourlyBuckets(existing: ReturnType<typeof aggregateHourlyBuckets>, 
   });
 }
 
-function getDimensionRange(dimension: StatsDimension, now: number): [number, number] {
-  const date = new Date(now);
+function getDimensionRange(dimension: StatsDimension, now: number, referenceTime?: number): [number, number] {
+  const ref = referenceTime ?? now;
+  const date = new Date(ref);
   if (dimension === 'minute') {
     date.setSeconds(0, 0);
     const start = date.getTime();
@@ -618,20 +620,20 @@ function getDimensionRange(dimension: StatsDimension, now: number): [number, num
   }
 
   if (dimension === 'month') {
-    const start = startOfLocalMonth(now);
+    const start = startOfLocalMonth(ref);
     const end = new Date(start);
     end.setMonth(end.getMonth() + 1);
     return [start, end.getTime()];
   }
 
   if (dimension === 'year') {
-    const start = startOfLocalYear(now);
+    const start = startOfLocalYear(ref);
     const end = new Date(start);
     end.setFullYear(end.getFullYear() + 1);
     return [start, end.getTime()];
   }
 
-  const start = startOfLocalDay(now);
+  const start = startOfLocalDay(ref);
   return [start, start + 24 * 60 * 60 * 1000];
 }
 

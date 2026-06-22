@@ -96,11 +96,11 @@ describe('SqliteEventStore', () => {
     expect(month.chartBuckets).toHaveLength(30);
     expect(month.keyTotal).toBe(1);
     expect(month.mouseTotal).toBe(1);
-    expect(month.chartBuckets[17]).toMatchObject({ label: '18', keyDownCount: 1, mouseClickCount: 1 });
+    expect(month.chartBuckets[17]).toMatchObject({ label: '6/18', keyDownCount: 1, mouseClickCount: 1 });
     expect(year.chartBuckets).toHaveLength(12);
     expect(year.wheelTotal).toBe(1);
-    expect(year.chartBuckets[0]).toMatchObject({ label: '1月', wheelCount: 1 });
-    expect(year.chartBuckets[5]).toMatchObject({ label: '6月', keyDownCount: 1, mouseClickCount: 1 });
+    expect(year.chartBuckets[0]).toMatchObject({ label: '2026/1月', wheelCount: 1 });
+    expect(year.chartBuckets[5]).toMatchObject({ label: '2026/6月', keyDownCount: 1, mouseClickCount: 1 });
   });
 
   it('returns event log rows with readable times and mouse wheel directions', () => {

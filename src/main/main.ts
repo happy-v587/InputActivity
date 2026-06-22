@@ -1,7 +1,7 @@
 import { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage } from 'electron';
 import { join } from 'node:path';
 import { defaultConfig } from '../shared/config';
-import type { ActivitySummary, SettingsPatch, StatsDimension, TrackingState } from '../shared/types';
+import type { ActivitySummary, LlmConfig, SavedChart, SettingsPatch, StatsDimension, TrackingState } from '../shared/types';
 import { UiohookInputCaptureAdapter } from './capture/uiohookAdapter';
 import { AsyncEventStore } from './storage/asyncEventStore';
 import { TrackingController } from './trackingController';
@@ -208,6 +208,27 @@ function bindIpc(activeController: TrackingController): void {
     await activeController.updateSettings(patch);
     return activeController.getSummary();
   });
+  ipcMain.handle('tracker:execute-query', (_event, sql: string) =>
+    activeController.executeQuery(sql)
+  );
+  ipcMain.handle('tracker:get-llm-config', () =>
+    activeController.getLlmConfig()
+  );
+  ipcMain.handle('tracker:set-llm-config', (_event, config: LlmConfig) =>
+    activeController.setLlmConfig(config)
+  );
+  ipcMain.handle('tracker:get-saved-charts', () =>
+    activeController.getSavedCharts()
+  );
+  ipcMain.handle('tracker:save-chart', (_event, chart: SavedChart) =>
+    activeController.saveChart(chart)
+  );
+  ipcMain.handle('tracker:delete-chart', (_event, id: string) =>
+    activeController.deleteChart(id)
+  );
+  ipcMain.handle('tracker:toggle-pin-chart', (_event, id: string) =>
+    activeController.togglePinChart(id)
+  );
 }
 
 app.whenReady().then(createApp).catch((error) => {

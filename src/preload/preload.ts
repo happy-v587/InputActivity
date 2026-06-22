@@ -1,9 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
   ActivitySummary,
+  ChartQueryResult,
   DimensionStats,
   EventLogPage,
+  LlmConfig,
   NormalizedInputEvent,
+  SavedChart,
   SettingsPatch,
   StatsDimension,
   TrackingState
@@ -21,6 +24,20 @@ const api = {
   stop: (): Promise<TrackingState> => ipcRenderer.invoke('tracker:stop'),
   updateSettings: (patch: SettingsPatch): Promise<ActivitySummary> =>
     ipcRenderer.invoke('tracker:update-settings', patch),
+  executeQuery: (sql: string): Promise<ChartQueryResult> =>
+    ipcRenderer.invoke('tracker:execute-query', sql),
+  getLlmConfig: (): Promise<LlmConfig | null> =>
+    ipcRenderer.invoke('tracker:get-llm-config'),
+  setLlmConfig: (config: LlmConfig): Promise<void> =>
+    ipcRenderer.invoke('tracker:set-llm-config', config),
+  getSavedCharts: (): Promise<SavedChart[]> =>
+    ipcRenderer.invoke('tracker:get-saved-charts'),
+  saveChart: (chart: SavedChart): Promise<void> =>
+    ipcRenderer.invoke('tracker:save-chart', chart),
+  deleteChart: (id: string): Promise<void> =>
+    ipcRenderer.invoke('tracker:delete-chart', id),
+  togglePinChart: (id: string): Promise<void> =>
+    ipcRenderer.invoke('tracker:toggle-pin-chart', id),
   onSummary: (listener: (summary: ActivitySummary) => void): (() => void) => {
     const handler = (_: Electron.IpcRendererEvent, summary: ActivitySummary): void => listener(summary);
     ipcRenderer.on('tracker:summary', handler);

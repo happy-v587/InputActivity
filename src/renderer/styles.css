@@ -1231,3 +1231,31 @@ select {
 select.configInput {
   cursor: pointer;
 }
+
+/* Update section */
+.updateSection {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+}
+
+.updateStatusText {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.updateProgressBar {
+  height: 6px;
+  background: var(--control-bg);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.updateProgressFill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}

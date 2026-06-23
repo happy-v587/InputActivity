@@ -1,4 +1,5 @@
 import { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage } from 'electron';
+import { autoUpdater } from 'electron-updater';
 import { join } from 'node:path';
 import { defaultConfig } from '../shared/config';
 import type {
@@ -39,6 +40,7 @@ async function createApp(): Promise<void> {
   createTray();
   bindController(controller);
   bindIpc(controller);
+  setupAutoUpdater();
 
   if (shouldStartTrackingOnLaunch()) {
     void controller.start();
@@ -258,6 +260,63 @@ function bindIpc(activeController: TrackingController): void {
     (_event, conversationId: string, summaryEntry: ChatEntry, deleteThroughEntryId: string) =>
       activeController.compactChatConversation(conversationId, summaryEntry, deleteThroughEntryId)
   );
+  ipcMain.handle('tracker:check-for-updates', () => {
+    autoUpdater.checkForUpdates().catch(() => {});
+  });
+}
+
+function setupAutoUpdater(): void {
+  if (!app.isPackaged) {
+    autoUpdater.autoDownload = false;
+    return;
+  }
+
+  autoUpdater.autoDownload = false;
+  autoUpdater.setFeedURL({ provider: 'github', owner: 'happy-v587', repo: 'InputActivity' });
+
+  autoUpdater.on('checking-for-update', () => {
+    mainWindow?.webContents.send('update:status', { status: 'checking' });
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    mainWindow?.webContents.send('update:status', {
+      status: 'available',
+      info: `Version ${info.version} available (${formatBytes(info.files?.[0]?.size ?? 0)})`
+    });
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    mainWindow?.webContents.send('update:status', { status: 'up-to-date', info: 'You have the latest version.' });
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    mainWindow?.webContents.send('update:status', {
+      status: 'downloading',
+      progress: progress.percent
+    });
+  });
+
+  autoUpdater.on('update-downloaded', () => {
+    mainWindow?.webContents.send('update:status', { status: 'downloaded', info: 'Update downloaded. Click to restart.' });
+  });
+
+  autoUpdater.on('error', (error) => {
+    mainWindow?.webContents.send('update:status', { status: 'error', info: error.message });
+  });
+
+  ipcMain.handle('tracker:download-update', () => {
+    autoUpdater.downloadUpdate().catch(() => {});
+  });
+
+  ipcMain.handle('tracker:quit-and-install', () => {
+    setTimeout(() => autoUpdater.quitAndInstall(), 300);
+  });
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) { return `${bytes}B`; }
+  if (bytes < 1024 * 1024) { return `${(bytes / 1024).toFixed(1)}KB`; }
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
 app.whenReady().then(createApp).catch((error) => {

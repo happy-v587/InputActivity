@@ -643,33 +643,41 @@ async function handleChatQuery(): Promise<void> {
   setChatBusy(true);
 
   try {
-    await completeProgressEntry(preparingEntry, 'Prepared request');
-    const sqlProgress = createProgressEntry(conversationId, 'Generating SQL', 'running');
-    appendLocalChatEntry(sqlProgress);
-    await window.tracker.saveChatEntry(sqlProgress);
+    await completeProgressEntry(preparingEntry, 'Thinking...');
+    const thinkingProgress = createProgressEntry(conversationId, 'Thinking...', 'running');
+    appendLocalChatEntry(thinkingProgress);
+    await window.tracker.saveChatEntry(thinkingProgress);
 
-    const sql = await generateSqlFromLlm(query, config);
-    lastQuerySql = sql;
-    await completeProgressEntry(sqlProgress, 'Generated SQL', { sqlQuery: sql });
+    const llmResponse = await callLlm(query, config);
+    await completeProgressEntry(thinkingProgress, llmResponse.thinking ? 'Thinking complete' : 'Responded');
 
-    const queryProgress = createProgressEntry(conversationId, 'Running query', 'running', { sqlQuery: sql });
-    appendLocalChatEntry(queryProgress);
-    await window.tracker.saveChatEntry(queryProgress);
+    if (llmResponse.sql) {
+      lastQuerySql = llmResponse.sql;
 
-    const result = await window.tracker.executeQuery(sql);
-    lastQueryResult = result;
-    await completeProgressEntry(queryProgress, `Query returned ${formatCount(result.rows.length)} rows`, { sqlQuery: sql });
+      const queryProgress = createProgressEntry(conversationId, 'Running query', 'running', { sqlQuery: llmResponse.sql });
+      appendLocalChatEntry(queryProgress);
+      await window.tracker.saveChatEntry(queryProgress);
 
-    const renderProgress = createProgressEntry(conversationId, 'Rendering result', 'running', { sqlQuery: sql });
-    appendLocalChatEntry(renderProgress);
-    await window.tracker.saveChatEntry(renderProgress);
+      const result = await window.tracker.executeQuery(llmResponse.sql);
+      lastQueryResult = result;
+      await completeProgressEntry(queryProgress, `Query returned ${formatCount(result.rows.length)} rows`, { sqlQuery: llmResponse.sql });
 
-    const answerText = buildAssistantSummary(result);
-    const answerEntry = createMessageEntry(conversationId, 'assistant', answerText, { sqlQuery: sql });
-    appendLocalChatEntry(answerEntry);
-    await window.tracker.saveChatEntry(answerEntry);
-    await completeProgressEntry(renderProgress, result.rows.length > 0 ? 'Rendered result' : 'Rendered empty result', { sqlQuery: sql });
-    renderChatResult({ sqlQuery: sql, result });
+      const renderProgress = createProgressEntry(conversationId, 'Rendering result', 'running', { sqlQuery: llmResponse.sql });
+      appendLocalChatEntry(renderProgress);
+      await window.tracker.saveChatEntry(renderProgress);
+
+      const answerText = buildAssistantSummary(result);
+      const answerEntry = createMessageEntry(conversationId, 'assistant', answerText, { sqlQuery: llmResponse.sql, thinking: llmResponse.thinking ?? undefined });
+      appendLocalChatEntry(answerEntry);
+      await window.tracker.saveChatEntry(answerEntry);
+      await completeProgressEntry(renderProgress, result.rows.length > 0 ? 'Rendered result' : 'Rendered empty result', { sqlQuery: llmResponse.sql });
+      renderChatResult({ sqlQuery: llmResponse.sql, result });
+    } else {
+      const answerEntry = createMessageEntry(conversationId, 'assistant', llmResponse.text, { thinking: llmResponse.thinking ?? undefined });
+      appendLocalChatEntry(answerEntry);
+      await window.tracker.saveChatEntry(answerEntry);
+      chatResult.style.display = 'none';
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const latestProgressEntry = getLatestRenderableProgressEntry(activeConversationEntries);
@@ -692,17 +700,26 @@ async function handleChatQuery(): Promise<void> {
   }
 }
 
-async function generateSqlFromLlm(query: string, config: LlmConfig): Promise<string> {
-  const schemaPrompt = `You are a SQL generator for a SQLite database tracking keyboard and mouse activity.
-The database has the following tables:
+type LlmResponse = {
+  sql: string | null;
+  text: string;
+  thinking: string | null;
+};
 
-1. input_events - records every keyboard and mouse event
+async function callLlm(query: string, config: LlmConfig): Promise<LlmResponse> {
+  const schemaPrompt = `You are a helpful assistant for the Input Activity desktop app that tracks keyboard and mouse usage.
+The database schema:
+
+1. input_events - every keyboard and mouse event
    Columns: id(TEXT), ts(INTEGER - unix ms), type(TEXT - key_down/key_up/mouse_down/mouse_up/wheel), device(TEXT - keyboard/mouse), key_code(TEXT), key_label(TEXT), button(TEXT - left/right/middle), wheel_delta_x(REAL), wheel_delta_y(REAL), repeat(INTEGER 0/1), noise(INTEGER 0/1), source(TEXT), created_at(INTEGER)
 
-2. minute_stats - pre-aggregated per-minute stats
+2. minute_stats - per-minute aggregates
    Columns: bucket_start(INTEGER - unix ms), key_down_count, mouse_click_count, wheel_count, active_ms, updated_at
 
-Generate ONLY a SQLite SQL query (SELECT or WITH only) for this request. Output ONLY the SQL, no markdown, no explanation, no code fences.
+Respond in one of two ways:
+- If the user asks about their activity data (charts, stats, queries), output ONLY a SQLite SELECT/WITH query, no markdown, no explanation.
+- Otherwise, respond conversationally as a helpful assistant. Do NOT output SQL for non-query questions.
+
 Request: ${query}`;
 
   let response: Response;
@@ -710,13 +727,13 @@ Request: ${query}`;
     response = await fetch(`${config.baseUrl}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': config.accessKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: config.model, max_tokens: 1000, messages: [{ role: 'user', content: schemaPrompt }] })
+      body: JSON.stringify({ model: config.model, max_tokens: 2000, messages: [{ role: 'user', content: schemaPrompt }] })
     });
   } else {
     response = await fetch(`${config.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.accessKey}` },
-      body: JSON.stringify({ model: config.model, messages: [{ role: 'user', content: schemaPrompt }], temperature: 0 })
+      body: JSON.stringify({ model: config.model, messages: [{ role: 'user', content: schemaPrompt }] })
     });
   }
 
@@ -725,20 +742,35 @@ Request: ${query}`;
   }
 
   const data = await response.json();
-  let sql: string;
+  let content: string;
+  let thinking: string | null = null;
+
   if (config.provider === 'anthropic') {
-    sql = data.content?.[0]?.text ?? '';
+    const blocks = data.content as Array<{ type: string; text?: string; thinking?: string }> | undefined;
+    if (blocks) {
+      for (const block of blocks) {
+        if (block.type === 'thinking' && block.thinking) {
+          thinking = block.thinking;
+        }
+      }
+      content = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+    } else {
+      content = '';
+    }
   } else {
-    sql = data.choices?.[0]?.message?.content ?? '';
+    content = data.choices?.[0]?.message?.content ?? '';
   }
 
-  sql = sql.replace(/```sql\s*/gi, '').replace(/```/g, '').trim();
+  content = content.trim();
 
-  if (!sql.toUpperCase().startsWith('SELECT') && !sql.toUpperCase().startsWith('WITH')) {
-    throw new Error('LLM did not generate a valid SELECT query');
+  // Check if it's SQL
+  const isSql = /^\s*(SELECT|WITH)\b/i.test(content);
+  if (isSql) {
+    const sql = content.replace(/```sql\s*/gi, '').replace(/```/g, '').trim();
+    return { sql, text: '', thinking };
   }
 
-  return sql;
+  return { sql: null, text: content, thinking };
 }
 
 function renderChatTranscript(): void {
@@ -776,14 +808,25 @@ function buildChatEntryElement(entry: ChatEntry): HTMLElement {
     return item;
   }
 
-  item.innerHTML = `
+  let html = `
     <div class="chatMessageHeader">
       <span>${escapeHtml(messageRoleLabel(entry.role))}</span>
       <time>${escapeHtml(formatChatTimestamp(entry.createdAt))}</time>
-    </div>
-    <div>${escapeHtml(entry.text).replace(/\n/g, '<br>')}</div>
-    ${entry.sqlQuery ? `<pre class="chatInlineSql">${escapeHtml(entry.sqlQuery)}</pre>` : ''}
-  `;
+    </div>`;
+
+  if (entry.thinking) {
+    html += `
+    <details class="chatThinkingBlock">
+      <summary>Thinking</summary>
+      <pre>${escapeHtml(entry.thinking)}</pre>
+    </details>`;
+  }
+
+  html += `
+    <div class="chatMessageText">${escapeHtml(entry.text).replace(/\n/g, '<br>')}</div>
+    ${entry.sqlQuery ? `<pre class="chatInlineSql">${escapeHtml(entry.sqlQuery)}</pre>` : ''}`;
+
+  item.innerHTML = html;
   return item;
 }
 

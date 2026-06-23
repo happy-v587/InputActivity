@@ -88,9 +88,9 @@ root.innerHTML = `
               <strong id="rangeLabel"></strong>
             </div>
             <div class="segments" role="tablist" aria-label="statistics dimension">
-              <button class="segment active" id="dimensionMinute" data-dimension="minute">Minute</button>
+              <button class="segment" id="dimensionMinute" data-dimension="minute">Minute</button>
               <button class="segment" id="dimensionHour" data-dimension="hour">Hour</button>
-              <button class="segment" id="dimensionDay" data-dimension="day">Day</button>
+              <button class="segment active" id="dimensionDay" data-dimension="day">Day</button>
               <button class="segment" id="dimensionMonth" data-dimension="month">Month</button>
               <button class="segment" id="dimensionYear" data-dimension="year">Year</button>
             </div>
@@ -319,7 +319,7 @@ const llmAccessKey = getEl<HTMLInputElement>('llmAccessKey');
 const llmModel = getEl<HTMLInputElement>('llmModel');
 
 let lastSummary: ActivitySummary | null = null;
-let selectedDimension: StatsDimension = 'minute';
+let selectedDimension: StatsDimension = 'day';
 let selectedYear: number = new Date().getFullYear();
 let latestWheelItems: FrequencyItem[] = [];
 let wheelPage = 1;
@@ -411,13 +411,18 @@ void window.tracker.getSummary().then(async (summary) => {
   renderSummary(resolvedSummary);
   return Promise.all([refreshStats(), refreshEventLog(), initializeChatPage()]);
 });
+let statsDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let logDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
 window.tracker.onSummary(renderSummary);
 window.tracker.onTrackingState((state, message) => {
   renderState(state, message);
 });
 window.tracker.onInput(() => {
-  void refreshStats();
-  void refreshEventLog();
+  if (statsDebounceTimer) clearTimeout(statsDebounceTimer);
+  if (logDebounceTimer) clearTimeout(logDebounceTimer);
+  statsDebounceTimer = setTimeout(() => void refreshStats(), 300);
+  logDebounceTimer = setTimeout(() => void refreshEventLog(), 300);
 });
 
 void loadLlmConfig();

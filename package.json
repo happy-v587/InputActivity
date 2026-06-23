@@ -68,6 +68,10 @@
       "hardenedRuntime": false,
       "gatekeeperAssess": false
     },
+    "linux": {
+      "category": "Utility",
+      "maintainer": "happy-v587 <20750625+happy-v587@users.noreply.github.com>"
+    },
     "publish": {
       "provider": "github",
       "owner": "happy-v587",

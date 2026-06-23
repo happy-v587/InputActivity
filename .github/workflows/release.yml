@@ -4,6 +4,9 @@ on:
   release:
     types:
       - published
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
@@ -95,9 +98,10 @@ jobs:
             release/*.blockmap
 
       - name: Upload files to GitHub Release
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' || (github.event_name == 'push' && github.ref_type == 'tag')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}
         shell: bash
         run: |
           shopt -s nullglob
@@ -115,4 +119,11 @@ jobs:
             echo "No release assets found."
             exit 1
           fi
-          gh release upload "${{ github.event.release.tag_name }}" "${files[@]}" --clobber
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" \
+              --target "$GITHUB_SHA" \
+              --title "$RELEASE_TAG" \
+              --notes "Automated release for $RELEASE_TAG." \
+              || gh release view "$RELEASE_TAG" >/dev/null
+          fi
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber

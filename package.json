@@ -44,6 +44,7 @@
   "build": {
     "appId": "com.keyboard.activity-tracker",
     "productName": "Input Activity",
+    "artifactName": "Input-Activity-${version}-${arch}.${ext}",
     "directories": {
       "output": "release"
     },

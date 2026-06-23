@@ -12,6 +12,7 @@
     "build": "tsc -p tsconfig.node.json && vite build",
     "mac:dir": "npm run build && npm run rebuild:native:electron && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --dir",
     "mac:dmg": "npm run build && npm run rebuild:native:electron && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg",
+    "mac:release": "npm run build && npm run rebuild:native:electron && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --publish never",
     "rebuild:native": "npm run rebuild:native:electron",
     "rebuild:native:electron": "electron-rebuild -f -w better-sqlite3 -w uiohook-napi",
     "rebuild:native:node": "npm rebuild better-sqlite3",
@@ -22,6 +23,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.9.1",
+    "electron-updater": "^6.8.9",
     "uiohook-napi": "^1.5.4",
     "vite": "^6.0.0"
   },
@@ -57,13 +59,19 @@
     "mac": {
       "category": "public.app-category.productivity",
       "target": [
-        "dir"
+        "dir",
+        "dmg"
       ],
       "extendInfo": {
         "LSUIElement": true
       },
       "hardenedRuntime": false,
       "gatekeeperAssess": false
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "happy-v587",
+      "repo": "InputActivity"
     },
     "npmRebuild": false
   }

@@ -17,6 +17,14 @@ export type StatsDimension = 'minute' | 'hour' | 'day' | 'month' | 'year';
 
 export type ThemeChoice = 'dark' | 'light' | 'blue' | 'green' | 'purple';
 
+export type UpdateStatusType = 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error';
+
+export interface UpdateStatus {
+  status: UpdateStatusType;
+  info?: string;
+  progress?: number;
+}
+
 export interface NormalizedInputEvent {
   id: string;
   ts: number;

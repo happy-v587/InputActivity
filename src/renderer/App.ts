@@ -10,7 +10,8 @@ import type {
   LlmConfig,
   StatsDimension,
   ThemeChoice,
-  TrackingState
+  TrackingState,
+  UpdateStatus
 } from '../shared/types';
 
 const root = document.querySelector<HTMLDivElement>('#app');
@@ -259,6 +260,16 @@ root.innerHTML = `
               <input id="llmModel" class="configInput" type="text" placeholder="gpt-4o" />
             </label>
           </div>
+          <div class="panelHeader" style="margin-top:24px">
+            <span>Update</span>
+          </div>
+          <div class="updateSection">
+            <button id="checkUpdateBtn" class="smallButton">Check for Updates</button>
+            <span id="updateStatus" class="updateStatusText">Ready</span>
+          </div>
+          <div id="updateProgressBar" class="updateProgressBar" style="display:none">
+            <div id="updateProgressFill" class="updateProgressFill"></div>
+          </div>
         </section>
       </section>
 
@@ -452,6 +463,52 @@ llmProvider.addEventListener('change', () => void saveLlmConfig());
 llmBaseUrl.addEventListener('change', () => void saveLlmConfig());
 llmAccessKey.addEventListener('change', () => void saveLlmConfig());
 llmModel.addEventListener('change', () => void saveLlmConfig());
+
+const checkUpdateBtn = getEl<HTMLButtonElement>('checkUpdateBtn');
+const updateStatusEl = getEl<HTMLElement>('updateStatus');
+const updateProgressBar = getEl<HTMLDivElement>('updateProgressBar');
+const updateProgressFill = getEl<HTMLDivElement>('updateProgressFill');
+
+checkUpdateBtn.addEventListener('click', () => {
+  updateStatusEl.textContent = 'Checking...';
+  checkUpdateBtn.disabled = true;
+  void window.tracker.checkForUpdates();
+});
+
+window.tracker.onUpdateStatus((status) => {
+  updateStatusEl.textContent = status.info ?? status.status;
+  checkUpdateBtn.disabled = status.status === 'checking' || status.status === 'downloading';
+  if (status.status === 'available') {
+    checkUpdateBtn.textContent = 'Download Update';
+    checkUpdateBtn.disabled = false;
+    checkUpdateBtn.onclick = () => {
+      checkUpdateBtn.disabled = true;
+      updateStatusEl.textContent = 'Downloading...';
+      void window.tracker.downloadUpdate();
+    };
+  } else if (status.status === 'downloading' && status.progress !== undefined) {
+    updateProgressBar.style.display = '';
+    updateProgressFill.style.width = `${status.progress}%`;
+    updateStatusEl.textContent = `Downloading... ${status.progress.toFixed(0)}%`;
+  } else if (status.status === 'downloaded') {
+    checkUpdateBtn.textContent = 'Restart & Install';
+    checkUpdateBtn.disabled = false;
+    checkUpdateBtn.onclick = () => void window.tracker.quitAndInstall();
+    updateProgressBar.style.display = 'none';
+  } else if (status.status === 'up-to-date') {
+    checkUpdateBtn.textContent = 'Check for Updates';
+    checkUpdateBtn.disabled = false;
+    checkUpdateBtn.onclick = null;
+    updateProgressBar.style.display = 'none';
+  } else if (status.status === 'error') {
+    checkUpdateBtn.textContent = 'Check for Updates';
+    checkUpdateBtn.disabled = false;
+    checkUpdateBtn.onclick = null;
+    updateProgressBar.style.display = 'none';
+  } else if (status.status === 'checking') {
+    updateProgressBar.style.display = 'none';
+  }
+});
 
 async function loadLlmConfig(): Promise<void> {
   try {

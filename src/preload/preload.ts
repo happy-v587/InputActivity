@@ -12,7 +12,8 @@ import type {
   SavedChart,
   SettingsPatch,
   StatsDimension,
-  TrackingState
+  TrackingState,
+  UpdateStatus
 } from '../shared/types';
 
 const api = {
@@ -68,6 +69,14 @@ const api = {
       listener(state, message);
     ipcRenderer.on('tracker:state', handler);
     return () => ipcRenderer.off('tracker:state', handler);
+  },
+  checkForUpdates: (): Promise<void> => ipcRenderer.invoke('tracker:check-for-updates'),
+  downloadUpdate: (): Promise<void> => ipcRenderer.invoke('tracker:download-update'),
+  quitAndInstall: (): Promise<void> => ipcRenderer.invoke('tracker:quit-and-install'),
+  onUpdateStatus: (listener: (status: UpdateStatus) => void): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, status: UpdateStatus): void => listener(status);
+    ipcRenderer.on('update:status', handler);
+    return () => ipcRenderer.off('update:status', handler);
   }
 };
 

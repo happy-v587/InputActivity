@@ -179,6 +179,12 @@ root.innerHTML = `
               <button id="newConversationBtn" class="smallButton">New</button>
             </div>
             <div class="chatConversationList" id="chatConversationList"></div>
+            <div class="chatSavedChartsSection" id="chatSavedChartsSection" style="display:none">
+              <div class="panelHeader chatSavedChartsHeader">
+                <span>Saved Charts</span>
+              </div>
+              <div class="chatSavedChartList" id="chatSavedChartList"></div>
+            </div>
           </aside>
 
           <section class="chatPanel" aria-label="chat query">
@@ -322,6 +328,8 @@ const saveChartBtn = getEl<HTMLButtonElement>('saveChartBtn');
 const newConversationBtn = getEl<HTMLButtonElement>('newConversationBtn');
 const deleteConversationBtn = getEl<HTMLButtonElement>('deleteConversationBtn');
 const chatConversationList = getEl<HTMLDivElement>('chatConversationList');
+const chatSavedChartsSection = getEl<HTMLDivElement>('chatSavedChartsSection');
+const chatSavedChartList = getEl<HTMLDivElement>('chatSavedChartList');
 const chatConversationTitle = getEl<HTMLElement>('chatConversationTitle');
 const chatConversationMeta = getEl<HTMLElement>('chatConversationMeta');
 const chatSqlPanel = getEl<HTMLDivElement>('chatSqlPanel');
@@ -535,6 +543,7 @@ async function saveLlmConfig(): Promise<void> {
 
 async function initializeChatPage(): Promise<void> {
   await refreshChatConversations();
+  await renderSavedChartsList();
   if (chatConversations.length > 0) {
     await loadConversation(chatConversations[0].id);
     return;
@@ -803,8 +812,9 @@ function buildChatEntryElement(entry: ChatEntry): HTMLElement {
         <time>${escapeHtml(formatChatTimestamp(entry.createdAt))}</time>
       </div>
       <div>${escapeHtml(entry.text)}</div>
-      ${entry.sqlQuery ? `<pre class="chatInlineSql">${escapeHtml(entry.sqlQuery)}</pre>` : ''}
+      ${entry.sqlQuery ? renderInlineSqlBlock(entry.sqlQuery) : ''}
     `;
+    attachInlineSqlRunHandler(item, entry.sqlQuery);
     return item;
   }
 
@@ -824,10 +834,30 @@ function buildChatEntryElement(entry: ChatEntry): HTMLElement {
 
   html += `
     <div class="chatMessageText">${escapeHtml(entry.text).replace(/\n/g, '<br>')}</div>
-    ${entry.sqlQuery ? `<pre class="chatInlineSql">${escapeHtml(entry.sqlQuery)}</pre>` : ''}`;
+    ${entry.sqlQuery ? renderInlineSqlBlock(entry.sqlQuery) : ''}`;
 
   item.innerHTML = html;
+  attachInlineSqlRunHandler(item, entry.sqlQuery);
   return item;
+}
+
+function renderInlineSqlBlock(sql: string): string {
+  return `
+    <div class="chatInlineSqlWrap">
+      <pre class="chatInlineSql">${escapeHtml(sql)}</pre>
+      <button class="tinyButton chatRunSqlBtn">Run</button>
+    </div>`;
+}
+
+function attachInlineSqlRunHandler(item: HTMLElement, sqlQuery: string | undefined): void {
+  if (!sqlQuery) {
+    return;
+  }
+  const btn = item.querySelector<HTMLButtonElement>('.chatRunSqlBtn');
+  if (btn) {
+    btn.disabled = chatBusy;
+    btn.addEventListener('click', () => void handleRerunSql(sqlQuery));
+  }
 }
 
 function renderChatResult(state?: ChatRenderState): void {
@@ -932,6 +962,90 @@ async function handleSaveChart(): Promise<void> {
     renderChatTranscript();
   }
   chartTitle.value = '';
+  await renderSavedChartsList();
+}
+
+async function handleRerunSql(sql: string): Promise<void> {
+  if (chatBusy || !sql) {
+    return;
+  }
+  setChatBusy(true);
+  try {
+    const result = await window.tracker.executeQuery(sql);
+    lastQuerySql = sql;
+    lastQueryResult = result;
+    renderChatResult({ sqlQuery: sql, result });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    lastQuerySql = sql;
+    lastQueryResult = null;
+    chatResult.style.display = '';
+    chatSqlPanel.style.display = '';
+    chatSqlText.textContent = sql;
+    chatResultChart.style.display = 'none';
+    chatEmptyResult.style.display = '';
+    chatEmptyResult.textContent = `Query failed: ${message}`;
+    chatResultMeta.textContent = 'Error';
+    saveChartBtn.disabled = true;
+  } finally {
+    setChatBusy(false);
+  }
+}
+
+async function renderSavedChartsList(): Promise<void> {
+  const charts = await window.tracker.getSavedCharts();
+  chatSavedChartsSection.style.display = charts.length > 0 ? '' : 'none';
+  chatSavedChartList.innerHTML = '';
+
+  for (const chart of charts) {
+    const card = document.createElement('div');
+    card.className = 'chatSavedChartCard';
+
+    const header = document.createElement('div');
+    header.className = 'chatSavedChartCardHeader';
+    header.innerHTML = `<span>${escapeHtml(chart.title)}</span><time>${escapeHtml(formatSavedChartTimestamp(chart.updatedAt))}</time>`;
+    card.appendChild(header);
+
+    const actions = document.createElement('div');
+    actions.className = 'chatSavedChartCardActions';
+
+    const openBtn = document.createElement('button');
+    openBtn.className = 'tinyButton';
+    openBtn.textContent = 'Open';
+    openBtn.disabled = chatBusy;
+    openBtn.addEventListener('click', () => void handleRerunSql(chart.sqlQuery));
+    actions.appendChild(openBtn);
+
+    const pinBtn = document.createElement('button');
+    pinBtn.className = 'tinyButton';
+    pinBtn.textContent = chart.pinned ? 'Unpin' : 'Pin';
+    pinBtn.disabled = chatBusy;
+    pinBtn.addEventListener('click', async () => {
+      await window.tracker.togglePinChart(chart.id);
+      await renderSavedChartsList();
+      void renderPinnedCharts();
+    });
+    actions.appendChild(pinBtn);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'tinyButton chatDangerBtn';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.disabled = chatBusy;
+    deleteBtn.addEventListener('click', async () => {
+      await window.tracker.deleteChart(chart.id);
+      await renderSavedChartsList();
+      void renderPinnedCharts();
+    });
+    actions.appendChild(deleteBtn);
+
+    card.appendChild(actions);
+    chatSavedChartList.appendChild(card);
+  }
+}
+
+function formatSavedChartTimestamp(timestamp: number): string {
+  const date = new Date(timestamp);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 async function handleDeleteConversation(): Promise<void> {
@@ -1248,6 +1362,12 @@ function setChatBusy(busy: boolean): void {
   saveChartBtn.disabled = busy || !lastQueryResult || !lastQuerySql;
   newConversationBtn.disabled = busy;
   deleteConversationBtn.disabled = busy || !activeConversationId;
+  document.querySelectorAll<HTMLButtonElement>('.chatRunSqlBtn').forEach((btn) => {
+    btn.disabled = busy;
+  });
+  document.querySelectorAll<HTMLButtonElement>('.chatSavedChartCardActions button').forEach((btn) => {
+    btn.disabled = busy;
+  });
 }
 
 

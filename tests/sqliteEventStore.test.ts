@@ -160,6 +160,36 @@ describe('SqliteEventStore', () => {
     ]);
   });
 
+  it('returns non-pinned saved charts so they remain discoverable after save', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'keyboard-store-'));
+    const dbPath = join(dir, 'activity.sqlite');
+    const store = new SqliteEventStore(dbPath, { ...defaultConfig, retentionDays: null });
+    const now = Date.now();
+
+    store.saveChart({
+      id: 'chart-unpinned',
+      title: 'Hourly Clicks',
+      sqlQuery: 'SELECT 1 AS value',
+      chartType: 'bar',
+      pinned: 0,
+      createdAt: now,
+      updatedAt: now
+    });
+
+    const charts = store.getSavedCharts();
+    store.close();
+
+    expect(charts.find((chart) => chart.id === 'chart-unpinned')).toEqual({
+      id: 'chart-unpinned',
+      title: 'Hourly Clicks',
+      sqlQuery: 'SELECT 1 AS value',
+      chartType: 'bar',
+      pinned: 0,
+      createdAt: now,
+      updatedAt: now
+    });
+  });
+
   it('persists chat conversations and entries across restart', () => {
     const dir = mkdtempSync(join(tmpdir(), 'keyboard-store-'));
     const dbPath = join(dir, 'activity.sqlite');

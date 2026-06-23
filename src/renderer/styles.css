@@ -912,6 +912,7 @@ select {
 
 .chatConversationList {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 10px;
   overflow-y: auto;
@@ -955,6 +956,74 @@ select {
 .chatConversationItem.active {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent);
+}
+
+.chatSavedChartsSection {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 120px;
+}
+
+.chatSavedChartsHeader {
+  font-size: 12px;
+  color: var(--subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.chatSavedChartList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: 2px;
+}
+
+.chatSavedChartCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.chatSavedChartCardHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chatSavedChartCardHeader span {
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chatSavedChartCardHeader time {
+  font-size: 11px;
+  color: var(--subtle);
+}
+
+.chatSavedChartCardActions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.chatSavedChartCardActions .tinyButton {
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+.chatDangerBtn {
+  color: var(--warn, #e5484d);
 }
 
 .chatConversationEmpty,
@@ -1067,6 +1136,21 @@ select {
   font-size: 11px;
   line-height: 1.4;
   overflow-x: auto;
+}
+
+.chatInlineSqlWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.chatInlineSqlWrap .chatInlineSql {
+  margin: 0;
+}
+
+.chatRunSqlBtn {
+  align-self: flex-start;
 }
 
 .chatInputBar {

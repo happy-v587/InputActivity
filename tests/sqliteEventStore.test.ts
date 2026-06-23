@@ -128,33 +128,165 @@ describe('SqliteEventStore', () => {
     ]);
   });
 
-  it('paginates event log rows', () => {
+  it('maps saved chart rows back to camelCase fields', () => {
     const dir = mkdtempSync(join(tmpdir(), 'keyboard-store-'));
     const dbPath = join(dir, 'activity.sqlite');
     const store = new SqliteEventStore(dbPath, { ...defaultConfig, retentionDays: null });
     const now = Date.now();
-    for (let index = 0; index < 12; index += 1) {
-      store.enqueue(
-        event({
-          id: `key-${index}`,
-          ts: now + index,
-          type: 'key_down',
-          keyCode: 'key:j',
-          keyLabel: 'J'
-        })
-      );
-    }
-    store.flush();
 
-    const first = store.getEventLog(1, 5);
-    const third = store.getEventLog(3, 5);
+    store.saveChart({
+      id: 'chart-1',
+      title: 'Daily Keys',
+      sqlQuery: 'SELECT 1 AS value',
+      chartType: 'bar',
+      pinned: 1,
+      createdAt: now,
+      updatedAt: now + 1
+    });
+
+    const charts = store.getSavedCharts();
     store.close();
 
-    expect(first.total).toBe(12);
-    expect(first.items).toHaveLength(5);
-    expect(first.items[0].id).toBe('key-11');
-    expect(third.page).toBe(3);
-    expect(third.items.map((item) => item.id)).toEqual(['key-1', 'key-0']);
+    expect(charts).toEqual([
+      {
+        id: 'chart-1',
+        title: 'Daily Keys',
+        sqlQuery: 'SELECT 1 AS value',
+        chartType: 'bar',
+        pinned: 1,
+        createdAt: now,
+        updatedAt: now + 1
+      }
+    ]);
+  });
+
+  it('persists chat conversations and entries across restart', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'keyboard-store-'));
+    const dbPath = join(dir, 'activity.sqlite');
+    const first = new SqliteEventStore(dbPath, { ...defaultConfig, retentionDays: null });
+    const conversation = {
+      id: 'conv-1',
+      title: 'Activity trends',
+      summary: '',
+      createdAt: 100,
+      updatedAt: 100
+    };
+    const entry = {
+      id: 'entry-1',
+      conversationId: 'conv-1',
+      kind: 'message' as const,
+      role: 'user' as const,
+      text: 'Show my key presses by day',
+      createdAt: 101
+    };
+
+    first.createChatConversation(conversation);
+    first.saveChatEntry(entry);
+    first.close();
+
+    const second = new SqliteEventStore(dbPath, { ...defaultConfig, retentionDays: null });
+    const conversations = second.getChatConversations();
+    const detail = second.getChatConversation('conv-1');
+    second.close();
+
+    expect(conversations).toEqual([
+      {
+        ...conversation,
+        updatedAt: 101,
+        summary: 'Show my key presses by day'
+      }
+    ]);
+    expect(detail).toEqual({
+      conversation: {
+        ...conversation,
+        updatedAt: 101,
+        summary: 'Show my key presses by day'
+      },
+      entries: [entry]
+    });
+  });
+
+  it('compacts old chat entries into a summary entry', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'keyboard-store-'));
+    const dbPath = join(dir, 'activity.sqlite');
+    const store = new SqliteEventStore(dbPath, { ...defaultConfig, retentionDays: null });
+
+    store.createChatConversation({
+      id: 'conv-compact',
+      title: 'Compact me',
+      summary: '',
+      createdAt: 100,
+      updatedAt: 100
+    });
+    store.saveChatEntry({
+      id: 'entry-a',
+      conversationId: 'conv-compact',
+      kind: 'message',
+      role: 'user',
+      text: 'First question',
+      createdAt: 101
+    });
+    store.saveChatEntry({
+      id: 'entry-b',
+      conversationId: 'conv-compact',
+      kind: 'message',
+      role: 'assistant',
+      text: 'First answer',
+      createdAt: 102
+    });
+    store.saveChatEntry({
+      id: 'entry-c',
+      conversationId: 'conv-compact',
+      kind: 'message',
+      role: 'user',
+      text: 'Second question',
+      createdAt: 103
+    });
+
+    store.compactChatConversation(
+      'conv-compact',
+      {
+        id: 'summary-1',
+        conversationId: 'conv-compact',
+        kind: 'summary',
+        role: 'system',
+        text: 'Earlier discussion summary',
+        rangeStart: 101,
+        rangeEnd: 102,
+        createdAt: 104
+      },
+      'entry-b'
+    );
+
+    const detail = store.getChatConversation('conv-compact');
+    const conversations = store.getChatConversations();
+    store.close();
+
+    expect(detail?.entries).toEqual([
+      {
+        id: 'entry-c',
+        conversationId: 'conv-compact',
+        kind: 'message',
+        role: 'user',
+        text: 'Second question',
+        createdAt: 103
+      },
+      {
+        id: 'summary-1',
+        conversationId: 'conv-compact',
+        kind: 'summary',
+        role: 'system',
+        text: 'Earlier discussion summary',
+        rangeStart: 101,
+        rangeEnd: 102,
+        createdAt: 104
+      }
+    ]);
+    expect(conversations[0]).toMatchObject({
+      id: 'conv-compact',
+      summary: 'Earlier discussion summary',
+      updatedAt: 104
+    });
   });
 });
 

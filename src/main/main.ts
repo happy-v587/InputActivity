@@ -1,7 +1,16 @@
 import { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage } from 'electron';
 import { join } from 'node:path';
 import { defaultConfig } from '../shared/config';
-import type { ActivitySummary, LlmConfig, SavedChart, SettingsPatch, StatsDimension, TrackingState } from '../shared/types';
+import type {
+  ActivitySummary,
+  ChatConversation,
+  ChatEntry,
+  LlmConfig,
+  SavedChart,
+  SettingsPatch,
+  StatsDimension,
+  TrackingState
+} from '../shared/types';
 import { UiohookInputCaptureAdapter } from './capture/uiohookAdapter';
 import { AsyncEventStore } from './storage/asyncEventStore';
 import { TrackingController } from './trackingController';
@@ -228,6 +237,26 @@ function bindIpc(activeController: TrackingController): void {
   );
   ipcMain.handle('tracker:toggle-pin-chart', (_event, id: string) =>
     activeController.togglePinChart(id)
+  );
+  ipcMain.handle('tracker:get-chat-conversations', () =>
+    activeController.getChatConversations()
+  );
+  ipcMain.handle('tracker:create-chat-conversation', (_event, conversation: ChatConversation) =>
+    activeController.createChatConversation(conversation)
+  );
+  ipcMain.handle('tracker:get-chat-conversation', (_event, id: string) =>
+    activeController.getChatConversation(id)
+  );
+  ipcMain.handle('tracker:save-chat-entry', (_event, entry: ChatEntry) =>
+    activeController.saveChatEntry(entry)
+  );
+  ipcMain.handle('tracker:delete-chat-conversation', (_event, id: string) =>
+    activeController.deleteChatConversation(id)
+  );
+  ipcMain.handle(
+    'tracker:compact-chat-conversation',
+    (_event, conversationId: string, summaryEntry: ChatEntry, deleteThroughEntryId: string) =>
+      activeController.compactChatConversation(conversationId, summaryEntry, deleteThroughEntryId)
   );
 }
 

@@ -143,6 +143,35 @@ export interface SavedChart {
   updatedAt: number;
 }
 
+export type ChatEntryKind = 'message' | 'progress' | 'summary';
+
+export interface ChatConversation {
+  id: string;
+  title: string;
+  summary: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ChatEntry {
+  id: string;
+  conversationId: string;
+  kind: ChatEntryKind;
+  role: 'user' | 'assistant' | 'system';
+  text: string;
+  status?: 'pending' | 'running' | 'completed' | 'error';
+  sqlQuery?: string;
+  chartTitle?: string;
+  rangeStart?: number;
+  rangeEnd?: number;
+  createdAt: number;
+}
+
+export interface ChatConversationDetail {
+  conversation: ChatConversation;
+  entries: ChatEntry[];
+}
+
 export type ChartQueryResult = {
   columns: string[];
   rows: Record<string, unknown>[];

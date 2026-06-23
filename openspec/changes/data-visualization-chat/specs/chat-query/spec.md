@@ -24,3 +24,41 @@ The system SHALL provide a safe, read-only SQL execution path against the local 
 #### Scenario: Prevent destructive queries
 - **WHEN** the generated SQL contains INSERT/UPDATE/DELETE/DROP/ALTER
 - **THEN** the system rejects the query and shows an error
+
+### Requirement: Visible Execution Progress
+The system SHALL show user-safe execution progress in the chat timeline instead of hidden model reasoning.
+
+#### Scenario: Query lifecycle events
+- **WHEN** a user sends a chat request
+- **THEN** the chat timeline shows progress entries for preparing the request, generating SQL, running the query, and rendering the result
+- **THEN** each progress entry uses plain product language rather than hidden model reasoning
+
+#### Scenario: Show generated SQL
+- **WHEN** the system successfully generates a SQL query
+- **THEN** the generated SQL is visible to the user before or alongside the rendered result
+
+### Requirement: Conversation History
+The system SHALL persist chat conversations and let users manage them from the chat page.
+
+#### Scenario: Resume past conversation
+- **WHEN** the app restarts after prior chat usage
+- **THEN** the user can open the chat page and see previously saved conversations
+- **THEN** selecting a conversation reloads its visible transcript and saved result state
+
+#### Scenario: Start a fresh conversation
+- **WHEN** the user chooses to start a new conversation
+- **THEN** the system creates a new empty conversation without deleting prior history
+
+#### Scenario: Delete a conversation
+- **WHEN** the user deletes a saved conversation
+- **THEN** the conversation no longer appears in the history list
+- **THEN** other saved conversations remain available
+
+### Requirement: Transcript Compaction
+The system SHALL keep long conversations usable by summarizing older context without deleting stored history.
+
+#### Scenario: Compact a long conversation
+- **WHEN** a conversation exceeds the configured visible transcript threshold
+- **THEN** the system stores a summary entry for older messages
+- **THEN** the chat view loads the summary together with the newest messages by default
+- **THEN** the original stored messages remain available in local persistence

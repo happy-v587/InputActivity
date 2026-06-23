@@ -2,6 +2,9 @@ import { EventEmitter } from 'node:events';
 import type {
   ActivitySummary,
   ChartQueryResult,
+  ChatConversation,
+  ChatConversationDetail,
+  ChatEntry,
   DimensionStats,
   EventLogPage,
   LlmConfig,
@@ -29,6 +32,12 @@ export interface EventStorePort {
   saveChart(chart: SavedChart): Promise<void>;
   deleteChart(id: string): Promise<void>;
   togglePinChart(id: string): Promise<void>;
+  getChatConversations(): Promise<ChatConversation[]>;
+  createChatConversation(conversation: ChatConversation): Promise<void>;
+  getChatConversation(id: string): Promise<ChatConversationDetail | null>;
+  saveChatEntry(entry: ChatEntry): Promise<void>;
+  deleteChatConversation(id: string): Promise<void>;
+  compactChatConversation(conversationId: string, summaryEntry: ChatEntry, deleteThroughEntryId: string): Promise<void>;
 }
 
 export class TrackingController extends EventEmitter {
@@ -163,6 +172,30 @@ export class TrackingController extends EventEmitter {
 
   togglePinChart(id: string): Promise<void> {
     return this.store.togglePinChart(id);
+  }
+
+  getChatConversations(): Promise<ChatConversation[]> {
+    return this.store.getChatConversations();
+  }
+
+  createChatConversation(conversation: ChatConversation): Promise<void> {
+    return this.store.createChatConversation(conversation);
+  }
+
+  getChatConversation(id: string): Promise<ChatConversationDetail | null> {
+    return this.store.getChatConversation(id);
+  }
+
+  saveChatEntry(entry: ChatEntry): Promise<void> {
+    return this.store.saveChatEntry(entry);
+  }
+
+  deleteChatConversation(id: string): Promise<void> {
+    return this.store.deleteChatConversation(id);
+  }
+
+  compactChatConversation(conversationId: string, summaryEntry: ChatEntry, deleteThroughEntryId: string): Promise<void> {
+    return this.store.compactChatConversation(conversationId, summaryEntry, deleteThroughEntryId);
   }
 
   async emitSummary(): Promise<void> {

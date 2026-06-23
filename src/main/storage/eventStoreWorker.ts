@@ -1,5 +1,12 @@
 import { parentPort, workerData } from 'node:worker_threads';
-import type { ChartQueryResult, LlmConfig, SavedChart, TrackerConfig } from '../../shared/types';
+import type {
+  ChartQueryResult,
+  ChatConversation,
+  ChatEntry,
+  LlmConfig,
+  SavedChart,
+  TrackerConfig
+} from '../../shared/types';
 import { SqliteEventStore } from './sqliteEventStore';
 
 if (!parentPort) {
@@ -62,6 +69,26 @@ function handleMessage(message: WorkerMessage): unknown {
     case 'togglePinChart':
       store.togglePinChart(message.payload.id);
       return undefined;
+    case 'getChatConversations':
+      return store.getChatConversations();
+    case 'createChatConversation':
+      store.createChatConversation(message.payload.conversation);
+      return undefined;
+    case 'getChatConversation':
+      return store.getChatConversation(message.payload.id);
+    case 'saveChatEntry':
+      store.saveChatEntry(message.payload.entry);
+      return undefined;
+    case 'deleteChatConversation':
+      store.deleteChatConversation(message.payload.id);
+      return undefined;
+    case 'compactChatConversation':
+      store.compactChatConversation(
+        message.payload.conversationId,
+        message.payload.summaryEntry,
+        message.payload.deleteThroughEntryId
+      );
+      return undefined;
     default:
       throw new Error(`Unknown worker message: ${(message as { type?: string }).type}`);
   }
@@ -82,4 +109,10 @@ type WorkerMessage =
   | { id: number; type: 'getSavedCharts' }
   | { id: number; type: 'saveChart'; payload: { chart: SavedChart } }
   | { id: number; type: 'deleteChart'; payload: { id: string } }
-  | { id: number; type: 'togglePinChart'; payload: { id: string } };
+  | { id: number; type: 'togglePinChart'; payload: { id: string } }
+  | { id: number; type: 'getChatConversations' }
+  | { id: number; type: 'createChatConversation'; payload: { conversation: ChatConversation } }
+  | { id: number; type: 'getChatConversation'; payload: { id: string } }
+  | { id: number; type: 'saveChatEntry'; payload: { entry: ChatEntry } }
+  | { id: number; type: 'deleteChatConversation'; payload: { id: string } }
+  | { id: number; type: 'compactChatConversation'; payload: { conversationId: string; summaryEntry: ChatEntry; deleteThroughEntryId: string } };

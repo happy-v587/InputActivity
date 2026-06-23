@@ -7,6 +7,9 @@ import type {
   AggregateBucket,
   ChartBucket,
   ChartQueryResult,
+  ChatConversation,
+  ChatConversationDetail,
+  ChatEntry,
   DimensionStats,
   EventLogItem,
   EventLogPage,
@@ -274,6 +277,33 @@ export class SqliteEventStore {
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS chat_conversations (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS chat_entries (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        role TEXT NOT NULL,
+        text TEXT NOT NULL,
+        status TEXT,
+        sql_query TEXT,
+        chart_title TEXT,
+        range_start INTEGER,
+        range_end INTEGER,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (conversation_id) REFERENCES chat_conversations(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS chat_conversations_updated_at_idx ON chat_conversations(updated_at DESC);
+      CREATE INDEX IF NOT EXISTS chat_entries_conversation_created_at_idx ON chat_entries(conversation_id, created_at ASC);
+      CREATE INDEX IF NOT EXISTS chat_entries_conversation_summary_idx ON chat_entries(conversation_id, kind, created_at ASC);
     `);
     this.db.prepare('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (1, ?)').run(Date.now());
     this.cleanupRetention();
@@ -531,8 +561,19 @@ export class SqliteEventStore {
 
   getSavedCharts(): SavedChart[] {
     return this.db
-      .prepare('SELECT id, title, sql_query, chart_type, pinned, created_at, updated_at FROM saved_charts ORDER BY updated_at DESC')
-      .all() as SavedChart[];
+      .prepare(
+        `SELECT id,
+                title,
+                sql_query,
+                chart_type,
+                pinned,
+                created_at,
+                updated_at
+           FROM saved_charts
+          ORDER BY pinned DESC, updated_at DESC, created_at DESC`
+      )
+      .all()
+      .map((row) => rowToSavedChart(row as SavedChartRow));
   }
 
   saveChart(chart: SavedChart): void {
@@ -549,6 +590,216 @@ export class SqliteEventStore {
 
   togglePinChart(id: string): void {
     this.db.prepare('UPDATE saved_charts SET pinned = CASE WHEN pinned THEN 0 ELSE 1 END, updated_at = ? WHERE id = ?').run(Date.now(), id);
+  }
+
+  getChatConversations(): ChatConversation[] {
+    return this.db
+      .prepare(
+        `SELECT id,
+                title,
+                summary,
+                created_at,
+                updated_at
+           FROM chat_conversations
+          ORDER BY updated_at DESC, created_at DESC`
+      )
+      .all()
+      .map((row) => rowToChatConversation(row as ChatConversationRow));
+  }
+
+  createChatConversation(conversation: ChatConversation): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO chat_conversations (
+          id, title, summary, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?)`
+      )
+      .run(
+        conversation.id,
+        conversation.title,
+        conversation.summary,
+        conversation.createdAt,
+        conversation.updatedAt
+      );
+  }
+
+  getChatConversation(id: string): ChatConversationDetail | null {
+    const conversationRow = this.db
+      .prepare(
+        `SELECT id,
+                title,
+                summary,
+                created_at,
+                updated_at
+           FROM chat_conversations
+          WHERE id = ?`
+      )
+      .get(id) as ChatConversationRow | undefined;
+
+    if (!conversationRow) {
+      return null;
+    }
+
+    const entries = this.db
+      .prepare(
+        `SELECT id,
+                conversation_id,
+                kind,
+                role,
+                text,
+                status,
+                sql_query,
+                chart_title,
+                range_start,
+                range_end,
+                created_at
+           FROM chat_entries
+          WHERE conversation_id = ?
+          ORDER BY created_at ASC, rowid ASC`
+      )
+      .all(id)
+      .map((row) => rowToChatEntry(row as ChatEntryRow));
+
+    return {
+      conversation: rowToChatConversation(conversationRow),
+      entries
+    };
+  }
+
+  saveChatEntry(entry: ChatEntry): void {
+    this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT OR REPLACE INTO chat_entries (
+            id,
+            conversation_id,
+            kind,
+            role,
+            text,
+            status,
+            sql_query,
+            chart_title,
+            range_start,
+            range_end,
+            created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          entry.id,
+          entry.conversationId,
+          entry.kind,
+          entry.role,
+          entry.text,
+          entry.status ?? null,
+          entry.sqlQuery ?? null,
+          entry.chartTitle ?? null,
+          entry.rangeStart ?? null,
+          entry.rangeEnd ?? null,
+          entry.createdAt
+        );
+      this.touchChatConversation(entry.conversationId, entry.createdAt, entry.text);
+    })();
+  }
+
+  deleteChatConversation(id: string): void {
+    this.db.prepare('DELETE FROM chat_conversations WHERE id = ?').run(id);
+  }
+
+  compactChatConversation(conversationId: string, summaryEntry: ChatEntry, deleteThroughEntryId: string): void {
+    this.db.transaction(() => {
+      const targetEntry = this.db
+        .prepare(
+          `SELECT created_at
+             FROM chat_entries
+            WHERE id = ? AND conversation_id = ?`
+        )
+        .get(deleteThroughEntryId, conversationId) as { created_at: number } | undefined;
+
+      if (!targetEntry) {
+        throw new Error('Chat entry to compact was not found');
+      }
+
+      this.db
+        .prepare(
+          `INSERT OR REPLACE INTO chat_entries (
+            id,
+            conversation_id,
+            kind,
+            role,
+            text,
+            status,
+            sql_query,
+            chart_title,
+            range_start,
+            range_end,
+            created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          summaryEntry.id,
+          summaryEntry.conversationId,
+          summaryEntry.kind,
+          summaryEntry.role,
+          summaryEntry.text,
+          summaryEntry.status ?? null,
+          summaryEntry.sqlQuery ?? null,
+          summaryEntry.chartTitle ?? null,
+          summaryEntry.rangeStart ?? null,
+          summaryEntry.rangeEnd ?? null,
+          summaryEntry.createdAt
+        );
+
+      this.db
+        .prepare(
+          `DELETE FROM chat_entries
+            WHERE conversation_id = ?
+              AND kind != 'summary'
+              AND created_at <= ?
+              AND id != ?`
+        )
+        .run(conversationId, targetEntry.created_at, summaryEntry.id);
+
+      this.touchChatConversation(conversationId, summaryEntry.createdAt, summaryEntry.text);
+    })();
+  }
+
+  private touchChatConversation(conversationId: string, updatedAt: number, fallbackSummary: string): void {
+    this.db
+      .prepare(
+        `UPDATE chat_conversations
+            SET updated_at = ?,
+                summary = COALESCE(
+                  (
+                    SELECT text
+                      FROM chat_entries
+                     WHERE conversation_id = ?
+                       AND kind = 'summary'
+                     ORDER BY created_at DESC, rowid DESC
+                     LIMIT 1
+                  ),
+                  (
+                    SELECT text
+                      FROM chat_entries
+                     WHERE conversation_id = ?
+                       AND kind = 'message'
+                       AND role = 'user'
+                     ORDER BY created_at DESC, rowid DESC
+                     LIMIT 1
+                  ),
+                  (
+                    SELECT text
+                      FROM chat_entries
+                     WHERE conversation_id = ?
+                       AND kind = 'message'
+                     ORDER BY created_at DESC, rowid DESC
+                     LIMIT 1
+                  ),
+                  NULLIF(TRIM(summary), ''),
+                  ?
+                )
+          WHERE id = ?`
+      )
+      .run(updatedAt, conversationId, conversationId, conversationId, fallbackSummary, conversationId);
   }
 }
 
@@ -571,6 +822,38 @@ interface FrequencyRow {
   id: string;
   label: string;
   count: number;
+}
+
+interface SavedChartRow {
+  id: string;
+  title: string;
+  sql_query: string;
+  chart_type: SavedChart['chartType'];
+  pinned: number;
+  created_at: number;
+  updated_at: number;
+}
+
+interface ChatConversationRow {
+  id: string;
+  title: string;
+  summary: string;
+  created_at: number;
+  updated_at: number;
+}
+
+interface ChatEntryRow {
+  id: string;
+  conversation_id: string;
+  kind: ChatEntry['kind'];
+  role: ChatEntry['role'];
+  text: string;
+  status: ChatEntry['status'] | null;
+  sql_query: string | null;
+  chart_title: string | null;
+  range_start: number | null;
+  range_end: number | null;
+  created_at: number;
 }
 
 function emptyAggregateBucket(bucketStart: number): AggregateBucket {
@@ -645,6 +928,44 @@ function rowToLogItem(row: EventRow): EventLogItem {
     device: row.device,
     label: eventLabel(row),
     detail: eventDetail(row)
+  };
+}
+
+function rowToSavedChart(row: SavedChartRow): SavedChart {
+  return {
+    id: row.id,
+    title: row.title,
+    sqlQuery: row.sql_query,
+    chartType: row.chart_type,
+    pinned: row.pinned,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function rowToChatConversation(row: ChatConversationRow): ChatConversation {
+  return {
+    id: row.id,
+    title: row.title,
+    summary: row.summary,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function rowToChatEntry(row: ChatEntryRow): ChatEntry {
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    kind: row.kind,
+    role: row.role,
+    text: row.text,
+    status: row.status ?? undefined,
+    sqlQuery: row.sql_query ?? undefined,
+    chartTitle: row.chart_title ?? undefined,
+    rangeStart: row.range_start ?? undefined,
+    rangeEnd: row.range_end ?? undefined,
+    createdAt: row.created_at
   };
 }
 

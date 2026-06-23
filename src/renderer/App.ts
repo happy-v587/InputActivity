@@ -1,9 +1,11 @@
 import './styles.css';
 import type {
   ActivitySummary,
+  ChatConversation,
+  ChatEntry,
+  ChartQueryResult,
   DimensionStats,
   EventLogPage,
-  EventLogItem,
   FrequencyItem,
   LlmConfig,
   StatsDimension,
@@ -159,28 +161,52 @@ root.innerHTML = `
       </section>
 
       <section class="page" id="chatPage">
-        <section class="chatPanel" aria-label="chat query">
-          <div class="panelHeader">
-            <div>
-              <span>Chat</span>
-              <small class="chatHint">Describe what you want to see about your activity data</small>
+        <section class="chatWorkspace">
+          <aside class="chatSidebarPanel" aria-label="chat history">
+            <div class="panelHeader chatSidebarHeader">
+              <div>
+                <span>Conversations</span>
+                <small class="chatHint">Saved locally on this device</small>
+              </div>
+              <button id="newConversationBtn" class="smallButton">New</button>
             </div>
-          </div>
-          <div class="chatBody">
-            <div class="chatMessages" id="chatMessages"></div>
-            <div class="chatResult" id="chatResult" style="display:none">
-              <div class="bars" id="chatBars"></div>
-              <div class="xAxis" id="chatXAxis"></div>
-              <div class="chatActions">
-                <input id="chartTitle" class="chartTitleInput" placeholder="Chart title..." />
-                <button id="saveChartBtn" class="smallButton">Save Chart</button>
+            <div class="chatConversationList" id="chatConversationList"></div>
+          </aside>
+
+          <section class="chatPanel" aria-label="chat query">
+            <div class="panelHeader chatPanelHeader">
+              <div>
+                <span id="chatConversationTitle">New conversation</span>
+                <small class="chatHint" id="chatConversationMeta">Describe what you want to see about your activity data</small>
+              </div>
+              <button id="deleteConversationBtn" class="smallButton">Delete</button>
+            </div>
+            <div class="chatBody">
+              <div class="chatMessages" id="chatMessages"></div>
+              <div class="chatResult" id="chatResult" style="display:none">
+                <div class="chatSqlPanel" id="chatSqlPanel" style="display:none">
+                  <div class="chatSqlHeader">
+                    <span>SQL</span>
+                    <span id="chatResultMeta"></span>
+                  </div>
+                  <pre id="chatSqlText"></pre>
+                </div>
+                <div class="chatResultChart" id="chatResultChart" style="display:none">
+                  <div class="bars" id="chatBars"></div>
+                  <div class="xAxis" id="chatXAxis"></div>
+                </div>
+                <div class="chatEmptyResult" id="chatEmptyResult" style="display:none">No rows returned for this query.</div>
+                <div class="chatActions">
+                  <input id="chartTitle" class="chartTitleInput" placeholder="Chart title..." />
+                  <button id="saveChartBtn" class="smallButton">Save Chart</button>
+                </div>
               </div>
             </div>
-          </div>
-          <div class="chatInputBar">
-            <textarea id="chatInput" rows="2" placeholder="e.g. Show me my most active hours on Thursdays"></textarea>
-            <button id="sendChat" class="primaryAction">Send</button>
-          </div>
+            <div class="chatInputBar">
+              <textarea id="chatInput" rows="3" placeholder="e.g. Show me my most active hours on Thursdays"></textarea>
+              <button id="sendChat" class="chatSendButton">Send</button>
+            </div>
+          </section>
         </section>
       </section>
 
@@ -275,6 +301,16 @@ const chatBars = getEl<HTMLDivElement>('chatBars');
 const chatXAxis = getEl<HTMLDivElement>('chatXAxis');
 const chartTitle = getEl<HTMLInputElement>('chartTitle');
 const saveChartBtn = getEl<HTMLButtonElement>('saveChartBtn');
+const newConversationBtn = getEl<HTMLButtonElement>('newConversationBtn');
+const deleteConversationBtn = getEl<HTMLButtonElement>('deleteConversationBtn');
+const chatConversationList = getEl<HTMLDivElement>('chatConversationList');
+const chatConversationTitle = getEl<HTMLElement>('chatConversationTitle');
+const chatConversationMeta = getEl<HTMLElement>('chatConversationMeta');
+const chatSqlPanel = getEl<HTMLDivElement>('chatSqlPanel');
+const chatSqlText = getEl<HTMLElement>('chatSqlText');
+const chatResultChart = getEl<HTMLDivElement>('chatResultChart');
+const chatEmptyResult = getEl<HTMLDivElement>('chatEmptyResult');
+const chatResultMeta = getEl<HTMLElement>('chatResultMeta');
 const pinnedCharts = getEl<HTMLDivElement>('pinnedCharts');
 const pinnedChartList = getEl<HTMLDivElement>('pinnedChartList');
 const llmProvider = getEl<HTMLSelectElement>('llmProvider');
@@ -290,6 +326,23 @@ let wheelPage = 1;
 const wheelPageSize = 2;
 let eventLogPage = 1;
 const eventLogPageSize = 50;
+
+type ChatMessageRole = 'user' | 'assistant' | 'system';
+type ProgressStatus = NonNullable<ChatEntry['status']>;
+
+type ChatRenderState = {
+  sqlQuery?: string;
+  result?: ChartQueryResult;
+};
+
+const visibleChatEntryLimit = 12;
+let chatConversations: ChatConversation[] = [];
+let activeConversationId: string | null = null;
+let activeConversationEntries: ChatEntry[] = [];
+let conversationDraft = createDraftConversation();
+let lastQueryResult: ChartQueryResult | null = null;
+let lastQuerySql = '';
+let chatBusy = false;
 
 const themeStorageKey = 'input-activity-theme';
 
@@ -356,7 +409,7 @@ void window.tracker.getSummary().then(async (summary) => {
       : summary;
 
   renderSummary(resolvedSummary);
-  return Promise.all([refreshStats(), refreshEventLog()]);
+  return Promise.all([refreshStats(), refreshEventLog(), initializeChatPage()]);
 });
 window.tracker.onSummary(renderSummary);
 window.tracker.onTrackingState((state, message) => {
@@ -377,6 +430,8 @@ chatInput.addEventListener('keydown', (e) => {
   }
 });
 saveChartBtn.addEventListener('click', () => void handleSaveChart());
+newConversationBtn.addEventListener('click', () => void startNewConversation());
+deleteConversationBtn.addEventListener('click', () => void handleDeleteConversation());
 llmProvider.addEventListener('change', () => void saveLlmConfig());
 llmBaseUrl.addEventListener('change', () => void saveLlmConfig());
 llmAccessKey.addEventListener('change', () => void saveLlmConfig());
@@ -405,8 +460,90 @@ async function saveLlmConfig(): Promise<void> {
   });
 }
 
-let lastQueryResult: { columns: string[]; rows: Record<string, unknown>[] } | null = null;
-let lastQuerySql = '';
+async function initializeChatPage(): Promise<void> {
+  await refreshChatConversations();
+  if (chatConversations.length > 0) {
+    await loadConversation(chatConversations[0].id);
+    return;
+  }
+  conversationDraft = createDraftConversation();
+  activeConversationId = null;
+  activeConversationEntries = [];
+  renderChatConversationList();
+  renderChatConversationHeader();
+  renderChatTranscript();
+  renderChatResult();
+}
+
+async function refreshChatConversations(): Promise<void> {
+  chatConversations = await window.tracker.getChatConversations();
+  renderChatConversationList();
+  renderChatConversationHeader();
+}
+
+async function loadConversation(conversationId: string): Promise<void> {
+  const detail = await window.tracker.getChatConversation(conversationId);
+  if (!detail) {
+    await refreshChatConversations();
+    if (chatConversations.length === 0) {
+      activeConversationId = null;
+      activeConversationEntries = [];
+      conversationDraft = createDraftConversation();
+      renderChatConversationHeader();
+      renderChatTranscript();
+      renderChatResult();
+      return;
+    }
+    await loadConversation(chatConversations[0].id);
+    return;
+  }
+
+  activeConversationId = detail.conversation.id;
+  activeConversationEntries = detail.entries;
+  conversationDraft = detail.conversation;
+  lastQuerySql = getLatestSql(detail.entries);
+  lastQueryResult = null;
+  renderChatConversationList();
+  renderChatConversationHeader();
+  renderChatTranscript();
+  renderChatResult();
+}
+
+async function startNewConversation(): Promise<void> {
+  activeConversationId = null;
+  activeConversationEntries = [];
+  conversationDraft = createDraftConversation();
+  lastQueryResult = null;
+  lastQuerySql = '';
+  chartTitle.value = '';
+  renderChatConversationList();
+  renderChatConversationHeader();
+  renderChatTranscript();
+  renderChatResult({});
+  chatInput.focus();
+}
+
+async function ensureActiveConversation(firstPrompt: string): Promise<string> {
+  if (activeConversationId) {
+    return activeConversationId;
+  }
+
+  const now = Date.now();
+  const conversation: ChatConversation = {
+    ...conversationDraft,
+    title: buildConversationTitle(firstPrompt),
+    summary: '',
+    createdAt: now,
+    updatedAt: now
+  };
+
+  await window.tracker.createChatConversation(conversation);
+  activeConversationId = conversation.id;
+  conversationDraft = conversation;
+  await refreshChatConversations();
+  renderChatConversationHeader();
+  return conversation.id;
+}
 
 async function handleChatQuery(): Promise<void> {
   const query = chatInput.value.trim();
@@ -416,28 +553,69 @@ async function handleChatQuery(): Promise<void> {
 
   const config = await window.tracker.getLlmConfig();
   if (!config || !config.accessKey) {
-    addChatMessage('system', 'Please configure LLM settings in the Config page first.');
+    appendLocalChatEntry(createMessageEntry(activeConversationId ?? conversationDraft.id, 'system', 'Please configure LLM settings in the Config page first.'));
+    renderChatTranscript();
     return;
   }
 
-  addChatMessage('user', query);
+  const conversationId = await ensureActiveConversation(query);
+  const userEntry = createMessageEntry(conversationId, 'user', query);
+  const preparingEntry = createProgressEntry(conversationId, 'Preparing request', 'running');
+  appendLocalChatEntry(userEntry, preparingEntry);
+  await window.tracker.saveChatEntry(userEntry);
+  await window.tracker.saveChatEntry(preparingEntry);
+  await maybeCompactConversation(conversationId);
+
   chatInput.value = '';
-  sendChat.disabled = true;
-  sendChat.textContent = 'Thinking...';
+  setChatBusy(true);
 
   try {
+    await completeProgressEntry(preparingEntry, 'Prepared request');
+    const sqlProgress = createProgressEntry(conversationId, 'Generating SQL', 'running');
+    appendLocalChatEntry(sqlProgress);
+    await window.tracker.saveChatEntry(sqlProgress);
+
     const sql = await generateSqlFromLlm(query, config);
     lastQuerySql = sql;
+    await completeProgressEntry(sqlProgress, 'Generated SQL', { sqlQuery: sql });
+
+    const queryProgress = createProgressEntry(conversationId, 'Running query', 'running', { sqlQuery: sql });
+    appendLocalChatEntry(queryProgress);
+    await window.tracker.saveChatEntry(queryProgress);
+
     const result = await window.tracker.executeQuery(sql);
     lastQueryResult = result;
-    addChatMessage('system', `Generated SQL: \`${sql}\``);
-    renderChatChart(result, sql);
+    await completeProgressEntry(queryProgress, `Query returned ${formatCount(result.rows.length)} rows`, { sqlQuery: sql });
+
+    const renderProgress = createProgressEntry(conversationId, 'Rendering result', 'running', { sqlQuery: sql });
+    appendLocalChatEntry(renderProgress);
+    await window.tracker.saveChatEntry(renderProgress);
+
+    const answerText = buildAssistantSummary(result);
+    const answerEntry = createMessageEntry(conversationId, 'assistant', answerText, { sqlQuery: sql });
+    appendLocalChatEntry(answerEntry);
+    await window.tracker.saveChatEntry(answerEntry);
+    await completeProgressEntry(renderProgress, result.rows.length > 0 ? 'Rendered result' : 'Rendered empty result', { sqlQuery: sql });
+    renderChatResult({ sqlQuery: sql, result });
   } catch (error) {
-    addChatMessage('system', `Error: ${error instanceof Error ? error.message : String(error)}`);
+    const message = error instanceof Error ? error.message : String(error);
+    const latestProgressEntry = getLatestRenderableProgressEntry(activeConversationEntries);
+    if (latestProgressEntry && latestProgressEntry.status !== 'completed') {
+      latestProgressEntry.text = message;
+      latestProgressEntry.status = 'error';
+      appendLocalChatEntry(latestProgressEntry);
+      await window.tracker.saveChatEntry(latestProgressEntry);
+    } else {
+      const errorEntry = createProgressEntry(conversationId, message, 'error');
+      appendLocalChatEntry(errorEntry);
+      await window.tracker.saveChatEntry(errorEntry);
+    }
     chatResult.style.display = 'none';
   } finally {
-    sendChat.disabled = false;
-    sendChat.textContent = 'Send';
+    await refreshChatConversations();
+    renderChatConversationHeader();
+    renderChatTranscript();
+    setChatBusy(false);
   }
 }
 
@@ -490,18 +668,100 @@ Request: ${query}`;
   return sql;
 }
 
-function addChatMessage(role: 'user' | 'system', text: string): void {
-  const msg = document.createElement('div');
-  msg.className = `chatMessage chat-${role}`;
-  msg.innerHTML = text.replace(/\n/g, '<br>');
-  chatMessages.appendChild(msg);
+function renderChatTranscript(): void {
+  chatMessages.innerHTML = '';
+  const visibleEntries = getVisibleChatEntries(activeConversationEntries);
+
+  if (visibleEntries.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'empty chatEmptyState';
+    empty.textContent = 'Start a conversation to query your activity history.';
+    chatMessages.appendChild(empty);
+    return;
+  }
+
+  for (const entry of visibleEntries) {
+    chatMessages.appendChild(buildChatEntryElement(entry));
+  }
   chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
-function renderChatChart(result: { columns: string[]; rows: Record<string, unknown>[] }, sql: string): void {
+function buildChatEntryElement(entry: ChatEntry): HTMLElement {
+  const item = document.createElement('div');
+  item.className = `chatMessage chat-${entry.role} chat-${entry.kind}`;
+
+  if (entry.kind === 'progress') {
+    item.classList.add(`chat-progress-${entry.status ?? 'completed'}`);
+    item.innerHTML = `
+      <div class="chatMessageHeader">
+        <span>${escapeHtml(progressLabel(entry.status ?? 'completed'))}</span>
+        <time>${escapeHtml(formatChatTimestamp(entry.createdAt))}</time>
+      </div>
+      <div>${escapeHtml(entry.text)}</div>
+      ${entry.sqlQuery ? `<pre class="chatInlineSql">${escapeHtml(entry.sqlQuery)}</pre>` : ''}
+    `;
+    return item;
+  }
+
+  item.innerHTML = `
+    <div class="chatMessageHeader">
+      <span>${escapeHtml(messageRoleLabel(entry.role))}</span>
+      <time>${escapeHtml(formatChatTimestamp(entry.createdAt))}</time>
+    </div>
+    <div>${escapeHtml(entry.text).replace(/\n/g, '<br>')}</div>
+    ${entry.sqlQuery ? `<pre class="chatInlineSql">${escapeHtml(entry.sqlQuery)}</pre>` : ''}
+  `;
+  return item;
+}
+
+function renderChatResult(state?: ChatRenderState): void {
+  const renderState = state ?? restoreChatRenderState(activeConversationEntries);
+  lastQuerySql = renderState.sqlQuery ?? '';
+  lastQueryResult = state?.result ?? lastQueryResult;
+  chartTitle.value = '';
+
+  if (!renderState.sqlQuery) {
+    chatResult.style.display = 'none';
+    saveChartBtn.disabled = true;
+    return;
+  }
+
+  chatResult.style.display = '';
+  chatSqlPanel.style.display = '';
+  chatSqlText.textContent = renderState.sqlQuery;
+
+  if (!renderState.result) {
+    chatResultChart.style.display = 'none';
+    chatEmptyResult.style.display = 'none';
+    chatResultMeta.textContent = 'Latest saved SQL';
+    saveChartBtn.disabled = true;
+    return;
+  }
+
+  chatResultMeta.textContent = `${formatCount(renderState.result.rows.length)} rows · ${formatCount(renderState.result.columns.length)} columns`;
+  if (renderState.result.rows.length === 0 || renderState.result.columns.length < 2) {
+    chatResultChart.style.display = 'none';
+    chatEmptyResult.style.display = '';
+    chatEmptyResult.textContent = renderState.result.rows.length === 0 ? 'No rows returned for this query.' : 'Not enough columns to draw a chart.';
+    saveChartBtn.disabled = false;
+    return;
+  }
+
+  renderChatChart(renderState.result);
+  saveChartBtn.disabled = false;
+}
+
+function renderChatChart(result: ChartQueryResult): void {
   const firstCol = result.columns[0];
-  const valueCol = result.columns.find((c) => c !== firstCol && typeof result.rows[0]?.[c] === 'number') ?? result.columns[1];
-  const values = result.rows.map((r) => Number(r[valueCol]) || 0);
+  const valueCol = result.columns.find((column) => column !== firstCol && typeof result.rows[0]?.[column] === 'number') ?? result.columns[1];
+  if (!firstCol || !valueCol) {
+    chatResultChart.style.display = 'none';
+    chatEmptyResult.style.display = '';
+    chatEmptyResult.textContent = 'Not enough columns to draw a chart.';
+    return;
+  }
+
+  const values = result.rows.map((row) => Number(row[valueCol]) || 0);
   const max = Math.max(1, ...values);
   const totalCols = result.rows.length;
 
@@ -510,14 +770,14 @@ function renderChatChart(result: { columns: string[]; rows: Record<string, unkno
   chatBars.style.gridTemplateColumns = `repeat(${Math.max(1, totalCols)}, minmax(4px, 1fr))`;
   chatXAxis.style.gridTemplateColumns = chatBars.style.gridTemplateColumns;
 
-  for (const [index, row] of result.rows.entries()) {
-    const v = Number(row[valueCol]) || 0;
-    const height = Math.max(4, (v / max) * 96);
+  for (const row of result.rows) {
+    const value = Number(row[valueCol]) || 0;
+    const height = Math.max(4, (value / max) * 96);
     const bar = document.createElement('div');
     bar.className = 'bar';
     bar.style.setProperty('--bar-height', `${height}px`);
-    bar.title = `${String(row[firstCol])} - ${v} events`;
-    bar.innerHTML = `${v > 0 ? `<span class="barValue">${formatCount(v)}</span>` : ''}<i></i>`;
+    bar.title = `${String(row[firstCol])} - ${value} events`;
+    bar.innerHTML = `${value > 0 ? `<span class="barValue">${formatCount(value)}</span>` : ''}<i></i>`;
     chatBars.appendChild(bar);
 
     const label = document.createElement('span');
@@ -526,12 +786,13 @@ function renderChatChart(result: { columns: string[]; rows: Record<string, unkno
     chatXAxis.appendChild(label);
   }
 
-  chatResult.style.display = '';
+  chatResultChart.style.display = '';
+  chatEmptyResult.style.display = 'none';
 }
 
 async function handleSaveChart(): Promise<void> {
   const title = chartTitle.value.trim();
-  if (!title || !lastQueryResult) {
+  if (!title || !lastQueryResult || !lastQuerySql) {
     return;
   }
   await window.tracker.saveChart({
@@ -543,18 +804,75 @@ async function handleSaveChart(): Promise<void> {
     createdAt: Date.now(),
     updatedAt: Date.now()
   });
-  addChatMessage('system', `Chart "${title}" saved.`);
+  if (activeConversationId) {
+    const savedEntry = createProgressEntry(activeConversationId, `Saved chart "${title}"`, 'completed', {
+      sqlQuery: lastQuerySql,
+      chartTitle: title
+    });
+    appendLocalChatEntry(savedEntry);
+    await window.tracker.saveChatEntry(savedEntry);
+    await refreshChatConversations();
+    renderChatConversationHeader();
+    renderChatTranscript();
+  }
   chartTitle.value = '';
+}
+
+async function handleDeleteConversation(): Promise<void> {
+  if (!activeConversationId) {
+    await startNewConversation();
+    return;
+  }
+
+  await window.tracker.deleteChatConversation(activeConversationId);
+  await refreshChatConversations();
+  if (chatConversations.length > 0) {
+    await loadConversation(chatConversations[0].id);
+    return;
+  }
+  await startNewConversation();
+}
+
+async function maybeCompactConversation(conversationId: string): Promise<void> {
+  const messageEntries = activeConversationEntries.filter((entry) => entry.kind === 'message');
+  if (messageEntries.length <= visibleChatEntryLimit) {
+    renderChatTranscript();
+    return;
+  }
+
+  const compactUntil = messageEntries[messageEntries.length - visibleChatEntryLimit - 1];
+  if (!compactUntil) {
+    renderChatTranscript();
+    return;
+  }
+
+  const earliestVisible = messageEntries[0];
+  const summaryText = buildConversationSummary(activeConversationEntries, compactUntil.createdAt);
+  const summaryEntry: ChatEntry = {
+    id: crypto.randomUUID(),
+    conversationId,
+    kind: 'summary',
+    role: 'system',
+    text: summaryText,
+    rangeStart: earliestVisible?.createdAt,
+    rangeEnd: compactUntil.createdAt,
+    createdAt: Date.now()
+  };
+
+  await window.tracker.compactChatConversation(conversationId, summaryEntry, compactUntil.id);
+  const detail = await window.tracker.getChatConversation(conversationId);
+  if (!detail) {
+    return;
+  }
+  activeConversationEntries = detail.entries;
+  conversationDraft = detail.conversation;
+  renderChatTranscript();
 }
 
 async function renderPinnedCharts(): Promise<void> {
   const charts = await window.tracker.getSavedCharts();
-  const pinned = charts.filter((c) => c.pinned);
-  if (pinned.length === 0) {
-    pinnedCharts.style.display = 'none';
-    return;
-  }
-  pinnedCharts.style.display = '';
+  const pinned = charts.filter((chart) => chart.pinned);
+  pinnedCharts.style.display = pinned.length > 0 ? '' : 'none';
   pinnedChartList.innerHTML = '';
 
   for (const chart of pinned) {
@@ -603,6 +921,219 @@ async function renderPinnedCharts(): Promise<void> {
     pinnedChartList.appendChild(card);
   }
 }
+
+function createDraftConversation(): ChatConversation {
+  const now = Date.now();
+  return {
+    id: crypto.randomUUID(),
+    title: 'New conversation',
+    summary: '',
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function createMessageEntry(
+  conversationId: string,
+  role: ChatMessageRole,
+  text: string,
+  extras: Partial<ChatEntry> = {}
+): ChatEntry {
+  return {
+    id: crypto.randomUUID(),
+    conversationId,
+    kind: 'message',
+    role,
+    text,
+    createdAt: Date.now(),
+    ...extras
+  };
+}
+
+function createProgressEntry(
+  conversationId: string,
+  text: string,
+  status: ProgressStatus,
+  extras: Partial<ChatEntry> = {}
+): ChatEntry {
+  return {
+    id: crypto.randomUUID(),
+    conversationId,
+    kind: 'progress',
+    role: 'system',
+    text,
+    status,
+    createdAt: Date.now(),
+    ...extras
+  };
+}
+
+function appendLocalChatEntry(...entries: ChatEntry[]): void {
+  for (const entry of entries) {
+    const existingIndex = activeConversationEntries.findIndex((item) => item.id === entry.id);
+    if (existingIndex >= 0) {
+      activeConversationEntries.splice(existingIndex, 1, entry);
+    } else {
+      activeConversationEntries.push(entry);
+    }
+  }
+  activeConversationEntries.sort((a, b) => a.createdAt - b.createdAt);
+}
+
+async function completeProgressEntry(
+  entry: ChatEntry,
+  text: string,
+  extras: Partial<ChatEntry> = {}
+): Promise<void> {
+  entry.text = text;
+  entry.status = 'completed';
+  Object.assign(entry, extras);
+  appendLocalChatEntry(entry);
+  await window.tracker.saveChatEntry(entry);
+}
+
+function getLatestSql(entries: ChatEntry[]): string {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const sql = entries[index]?.sqlQuery;
+    if (sql) {
+      return sql;
+    }
+  }
+  return '';
+}
+
+function restoreChatRenderState(entries: ChatEntry[]): ChatRenderState {
+  const sqlQuery = getLatestSql(entries);
+  return sqlQuery ? { sqlQuery } : {};
+}
+
+function buildAssistantSummary(result: ChartQueryResult): string {
+  if (result.rows.length === 0) {
+    return 'I ran the query, but it returned no rows.';
+  }
+
+  const firstColumn = result.columns[0];
+  const numericColumn = result.columns.find((column) => typeof result.rows[0]?.[column] === 'number');
+  if (!firstColumn || !numericColumn) {
+    return `I ran the query and got ${formatCount(result.rows.length)} rows.`;
+  }
+
+  const preview = result.rows
+    .slice(0, 3)
+    .map((row) => `${String(row[firstColumn])}: ${formatCount(Number(row[numericColumn]) || 0)}`)
+    .join(', ');
+  return `I ran the query and got ${formatCount(result.rows.length)} rows. Top results: ${preview}.`;
+}
+
+function progressLabel(status: ProgressStatus): string {
+  switch (status) {
+    case 'pending':
+      return 'Pending';
+    case 'running':
+      return 'Working';
+    case 'error':
+      return 'Error';
+    default:
+      return 'Done';
+  }
+}
+
+function formatChatTimestamp(timestamp: number): string {
+  const date = new Date(timestamp);
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function messageRoleLabel(role: ChatMessageRole): string {
+  switch (role) {
+    case 'user':
+      return 'You';
+    case 'assistant':
+      return 'Assistant';
+    default:
+      return 'System';
+  }
+}
+
+function getVisibleChatEntries(entries: ChatEntry[]): ChatEntry[] {
+  const summaryEntries = entries.filter((entry) => entry.kind === 'summary');
+  const nonSummaryEntries = entries.filter((entry) => entry.kind !== 'summary');
+  return [...summaryEntries, ...nonSummaryEntries.slice(-visibleChatEntryLimit)];
+}
+
+function getLatestRenderableProgressEntry(entries: ChatEntry[]): ChatEntry | null {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry?.kind === 'progress') {
+      return entry;
+    }
+  }
+  return null;
+}
+
+function buildConversationTitle(prompt: string): string {
+  const normalized = prompt.replace(/\s+/g, ' ').trim();
+  return normalized.length <= 48 ? normalized : `${normalized.slice(0, 45)}...`;
+}
+
+function buildConversationSummary(entries: ChatEntry[], throughTimestamp: number): string {
+  const source = entries
+    .filter((entry) => entry.createdAt <= throughTimestamp && entry.kind === 'message')
+    .slice(-6)
+    .map((entry) => `${messageRoleLabel(entry.role)}: ${entry.text.replace(/\s+/g, ' ').trim()}`);
+  return source.length > 0 ? `Earlier discussion: ${source.join(' | ')}` : 'Earlier discussion summary';
+}
+
+function renderChatConversationList(): void {
+  chatConversationList.innerHTML = '';
+
+  if (chatConversations.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'empty chatConversationEmpty';
+    empty.textContent = 'No saved conversations yet.';
+    chatConversationList.appendChild(empty);
+    return;
+  }
+
+  for (const conversation of chatConversations) {
+    const title = conversation.title.trim() || 'Untitled conversation';
+    const summary = conversation.summary.trim() || 'Ask about your keyboard or mouse activity.';
+    const button = document.createElement('button');
+    button.className = 'chatConversationItem';
+    if (conversation.id === activeConversationId) {
+      button.classList.add('active');
+    }
+    button.innerHTML = `
+      <strong title="${escapeHtml(title)}">${escapeHtml(title)}</strong>
+      <span title="${escapeHtml(summary)}">${escapeHtml(summary)}</span>
+      <time>${escapeHtml(formatChatTimestamp(conversation.updatedAt))}</time>
+    `;
+    button.addEventListener('click', () => {
+      void loadConversation(conversation.id);
+    });
+    chatConversationList.appendChild(button);
+  }
+}
+
+function renderChatConversationHeader(): void {
+  const activeConversation = activeConversationId
+    ? chatConversations.find((conversation) => conversation.id === activeConversationId) ?? conversationDraft
+    : conversationDraft;
+  const title = activeConversation.title.trim() || 'New conversation';
+  const summary = activeConversation.summary.trim() || 'Describe what you want to see about your activity data';
+  chatConversationTitle.textContent = title;
+  chatConversationMeta.textContent = summary;
+  deleteConversationBtn.disabled = !activeConversationId || chatBusy;
+}
+
+function setChatBusy(busy: boolean): void {
+  chatBusy = busy;
+  sendChat.disabled = busy;
+  chatInput.disabled = busy;
+  saveChartBtn.disabled = busy || !lastQueryResult || !lastQuerySql;
+  newConversationBtn.disabled = busy;
+  deleteConversationBtn.disabled = busy || !activeConversationId;
+}
+
 
 async function startOrResume(): Promise<void> {
   await runAction(async () => {

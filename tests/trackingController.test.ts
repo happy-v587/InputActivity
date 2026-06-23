@@ -6,6 +6,9 @@ import { describe, expect, it } from 'vitest';
 import { defaultConfig } from '../src/shared/config';
 import type {
   ActivitySummary,
+  ChatConversation,
+  ChatConversationDetail,
+  ChatEntry,
   DimensionStats,
   EventLogPage,
   NormalizedInputEvent,
@@ -168,6 +171,30 @@ class TestStorePort implements EventStorePort {
   }
 
   async togglePinChart(): Promise<void> {
+    // no-op
+  }
+
+  async getChatConversations(): Promise<ChatConversation[]> {
+    return [];
+  }
+
+  async createChatConversation(): Promise<void> {
+    // no-op
+  }
+
+  async getChatConversation(): Promise<ChatConversationDetail | null> {
+    return null;
+  }
+
+  async saveChatEntry(): Promise<void> {
+    // no-op
+  }
+
+  async deleteChatConversation(): Promise<void> {
+    // no-op
+  }
+
+  async compactChatConversation(_conversationId: string, _summaryEntry: ChatEntry, _deleteThroughEntryId: string): Promise<void> {
     // no-op
   }
 }

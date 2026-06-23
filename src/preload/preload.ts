@@ -2,6 +2,9 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type {
   ActivitySummary,
   ChartQueryResult,
+  ChatConversation,
+  ChatConversationDetail,
+  ChatEntry,
   DimensionStats,
   EventLogPage,
   LlmConfig,
@@ -38,6 +41,18 @@ const api = {
     ipcRenderer.invoke('tracker:delete-chart', id),
   togglePinChart: (id: string): Promise<void> =>
     ipcRenderer.invoke('tracker:toggle-pin-chart', id),
+  getChatConversations: (): Promise<ChatConversation[]> =>
+    ipcRenderer.invoke('tracker:get-chat-conversations'),
+  createChatConversation: (conversation: ChatConversation): Promise<void> =>
+    ipcRenderer.invoke('tracker:create-chat-conversation', conversation),
+  getChatConversation: (id: string): Promise<ChatConversationDetail | null> =>
+    ipcRenderer.invoke('tracker:get-chat-conversation', id),
+  saveChatEntry: (entry: ChatEntry): Promise<void> =>
+    ipcRenderer.invoke('tracker:save-chat-entry', entry),
+  deleteChatConversation: (id: string): Promise<void> =>
+    ipcRenderer.invoke('tracker:delete-chat-conversation', id),
+  compactChatConversation: (conversationId: string, summaryEntry: ChatEntry, deleteThroughEntryId: string): Promise<void> =>
+    ipcRenderer.invoke('tracker:compact-chat-conversation', conversationId, summaryEntry, deleteThroughEntryId),
   onSummary: (listener: (summary: ActivitySummary) => void): (() => void) => {
     const handler = (_: Electron.IpcRendererEvent, summary: ActivitySummary): void => listener(summary);
     ipcRenderer.on('tracker:summary', handler);

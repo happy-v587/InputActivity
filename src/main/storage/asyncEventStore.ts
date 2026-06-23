@@ -2,6 +2,9 @@ import { Worker } from 'node:worker_threads';
 import type {
   ActivitySummary,
   ChartQueryResult,
+  ChatConversation,
+  ChatConversationDetail,
+  ChatEntry,
   DimensionStats,
   EventLogPage,
   LlmConfig,
@@ -26,7 +29,13 @@ type WorkerRequest =
   | { id: number; type: 'getSavedCharts' }
   | { id: number; type: 'saveChart'; payload: { chart: SavedChart } }
   | { id: number; type: 'deleteChart'; payload: { id: string } }
-  | { id: number; type: 'togglePinChart'; payload: { id: string } };
+  | { id: number; type: 'togglePinChart'; payload: { id: string } }
+  | { id: number; type: 'getChatConversations' }
+  | { id: number; type: 'createChatConversation'; payload: { conversation: ChatConversation } }
+  | { id: number; type: 'getChatConversation'; payload: { id: string } }
+  | { id: number; type: 'saveChatEntry'; payload: { entry: ChatEntry } }
+  | { id: number; type: 'deleteChatConversation'; payload: { id: string } }
+  | { id: number; type: 'compactChatConversation'; payload: { conversationId: string; summaryEntry: ChatEntry; deleteThroughEntryId: string } };
 
 type WorkerResponse =
   | { id: number; ok: true; value: unknown }
@@ -108,6 +117,34 @@ export class AsyncEventStore {
 
   togglePinChart(id: string): Promise<void> {
     return this.request<void>({ id: 0, type: 'togglePinChart', payload: { id } });
+  }
+
+  getChatConversations(): Promise<ChatConversation[]> {
+    return this.request<ChatConversation[]>({ id: 0, type: 'getChatConversations' });
+  }
+
+  createChatConversation(conversation: ChatConversation): Promise<void> {
+    return this.request<void>({ id: 0, type: 'createChatConversation', payload: { conversation } });
+  }
+
+  getChatConversation(id: string): Promise<ChatConversationDetail | null> {
+    return this.request<ChatConversationDetail | null>({ id: 0, type: 'getChatConversation', payload: { id } });
+  }
+
+  saveChatEntry(entry: ChatEntry): Promise<void> {
+    return this.request<void>({ id: 0, type: 'saveChatEntry', payload: { entry } });
+  }
+
+  deleteChatConversation(id: string): Promise<void> {
+    return this.request<void>({ id: 0, type: 'deleteChatConversation', payload: { id } });
+  }
+
+  compactChatConversation(conversationId: string, summaryEntry: ChatEntry, deleteThroughEntryId: string): Promise<void> {
+    return this.request<void>({
+      id: 0,
+      type: 'compactChatConversation',
+      payload: { conversationId, summaryEntry, deleteThroughEntryId }
+    });
   }
 
   private request<T>(request: WorkerRequest): Promise<T> {

@@ -91,6 +91,8 @@ jobs:
             release/*.exe
             release/*.tar.gz
             release/*.zip
+            release/*.yml
+            release/*.blockmap
 
       - name: Upload files to GitHub Release
         if: github.event_name == 'release'
@@ -106,6 +108,8 @@ jobs:
             release/*.exe
             release/*.tar.gz
             release/*.zip
+            release/*.yml
+            release/*.blockmap
           )
           if [ "${#files[@]}" -eq 0 ]; then
             echo "No release assets found."

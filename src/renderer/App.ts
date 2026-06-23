@@ -99,6 +99,13 @@ root.innerHTML = `
               <span id="yearLabel"></span>
               <button id="nextYear" class="tinyButton" title="Next year">▶</button>
             </div>
+            <select id="refreshInterval" class="refreshSelect" title="Auto-refresh interval">
+              <option value="1000">1s</option>
+              <option value="5000" selected>5s</option>
+              <option value="10000">10s</option>
+              <option value="30000">30s</option>
+              <option value="60000">1m</option>
+            </select>
           </div>
           <div class="chartBody">
             <div class="bars" id="bars"></div>
@@ -326,6 +333,10 @@ let wheelPage = 1;
 const wheelPageSize = 2;
 let eventLogPage = 1;
 const eventLogPageSize = 50;
+let currentPage = 'overview';
+let refreshInterval = 5000;
+let refreshTimer: ReturnType<typeof setInterval> | null = null;
+let cachedHeatmapCounts: Map<string, number> | null = null;
 
 type ChatMessageRole = 'user' | 'assistant' | 'system';
 type ProgressStatus = NonNullable<ChatEntry['status']>;
@@ -410,22 +421,22 @@ void window.tracker.getSummary().then(async (summary) => {
 
   renderSummary(resolvedSummary);
   return Promise.all([refreshStats(), refreshEventLog(), initializeChatPage()]);
-});
-let statsDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-let logDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+}).then(() => startRefreshTimer());
 
 window.tracker.onSummary(renderSummary);
 window.tracker.onTrackingState((state, message) => {
   renderState(state, message);
 });
 window.tracker.onInput(() => {
-  if (statsDebounceTimer) clearTimeout(statsDebounceTimer);
-  if (logDebounceTimer) clearTimeout(logDebounceTimer);
-  statsDebounceTimer = setTimeout(() => void refreshStats(), 300);
-  logDebounceTimer = setTimeout(() => void refreshEventLog(), 300);
+  // Stats and event log are refreshed by periodic timer, not on every keystroke
 });
 
 void loadLlmConfig();
+
+getEl<HTMLSelectElement>('refreshInterval').addEventListener('change', function () {
+  refreshInterval = Number(this.value);
+  startRefreshTimer();
+});
 
 sendChat.addEventListener('click', () => void handleChatQuery());
 chatInput.addEventListener('keydown', (e) => {
@@ -1192,10 +1203,16 @@ function renderStats(stats: DimensionStats): void {
 }
 
 function renderKeyboardHeatmap(target: HTMLElement, items: FrequencyItem[]): void {
-  target.innerHTML = '';
   const counts = new Map(items.map((item) => [normalizeKeyLabel(item.label), item.count]));
   const max = Math.max(1, ...items.map((item) => item.count));
 
+  // Cache current counts so old data is never cleared before new data is ready
+  if (counts.size > 0) {
+    cachedHeatmapCounts = counts;
+  }
+  const effectiveCounts = counts.size > 0 ? counts : (cachedHeatmapCounts ?? counts);
+
+  const fragment = document.createDocumentFragment();
   const keyboard = document.createElement('div');
   keyboard.className = 'keyboardHeatmap';
 
@@ -1205,7 +1222,7 @@ function renderKeyboardHeatmap(target: HTMLElement, items: FrequencyItem[]): voi
     rowElement.style.gridTemplateColumns = row.map((key) => `${keyboardKeyWeight(key)}fr`).join(' ');
 
     for (const key of row) {
-      const count = counts.get(normalizeKeyLabel(key.label)) ?? 0;
+      const count = effectiveCounts.get(normalizeKeyLabel(key.label)) ?? 0;
       const intensity = count > 0 ? 0.16 + (count / max) * 0.84 : 0;
       const keyElement = document.createElement('div');
       keyElement.className = `keyboardKey ${key.size ?? ''}`;
@@ -1221,7 +1238,9 @@ function renderKeyboardHeatmap(target: HTMLElement, items: FrequencyItem[]): voi
     keyboard.appendChild(rowElement);
   }
 
-  target.appendChild(keyboard);
+  fragment.appendChild(keyboard);
+  target.innerHTML = '';
+  target.appendChild(fragment);
 }
 
 function keyboardKeyWeight(key: KeyboardKey): number {
@@ -1425,6 +1444,7 @@ function updateDimensionButtons(): void {
 }
 
 function switchPage(page: string): void {
+  currentPage = page;
   for (const button of document.querySelectorAll<HTMLButtonElement>('.tab')) {
     button.classList.toggle('active', button.dataset.page === page);
   }
@@ -1434,6 +1454,26 @@ function switchPage(page: string): void {
   getEl<HTMLElement>('configPage').classList.toggle('active', page === 'config');
   if (page === 'overview') {
     void renderPinnedCharts();
+    startRefreshTimer();
+  } else {
+    stopRefreshTimer();
+  }
+}
+
+function startRefreshTimer(): void {
+  stopRefreshTimer();
+  if (currentPage === 'overview') {
+    refreshTimer = setInterval(() => {
+      void refreshStats();
+      void refreshEventLog();
+    }, refreshInterval);
+  }
+}
+
+function stopRefreshTimer(): void {
+  if (refreshTimer !== null) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
   }
 }
 

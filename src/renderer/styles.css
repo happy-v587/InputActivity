@@ -470,6 +470,17 @@ h1 {
   color: var(--text);
 }
 
+.refreshSelect {
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--control-bg);
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
 .chartBody {
   position: relative;
   min-width: 0;

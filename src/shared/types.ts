@@ -172,6 +172,7 @@ export interface ChatEntry {
   chartTitle?: string;
   rangeStart?: number;
   rangeEnd?: number;
+  thinking?: string;
   createdAt: number;
 }
 

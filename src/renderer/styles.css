@@ -1259,3 +1259,34 @@ select.configInput {
   border-radius: 3px;
   transition: width 0.3s ease;
 }
+
+/* Chat thinking block */
+.chatThinkingBlock {
+  margin: 4px 0 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--line);
+}
+
+.chatThinkingBlock summary {
+  color: var(--subtle);
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.chatThinkingBlock pre {
+  margin: 6px 0 0;
+  padding: 0;
+  color: var(--subtle);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chatMessageText {
+  white-space: pre-wrap;
+  word-break: break-word;
+}

@@ -1,6 +1,8 @@
 import { EventEmitter } from 'node:events';
 import type {
   ActivitySummary,
+  BehaviorAnalysis,
+  BehaviorPeriod,
   ChartQueryResult,
   ChatConversation,
   ChatConversationDetail,
@@ -9,6 +11,7 @@ import type {
   EventLogPage,
   LlmConfig,
   NormalizedInputEvent,
+  PetKind,
   SavedChart,
   SettingsPatch,
   StatsDimension,
@@ -198,6 +201,52 @@ export class TrackingController extends EventEmitter {
     return this.store.compactChatConversation(conversationId, summaryEntry, deleteThroughEntryId);
   }
 
+  async getBehaviorAnalysis(): Promise<BehaviorAnalysis> {
+    const dayStart = new Date();
+    dayStart.setHours(0, 0, 0, 0);
+    const startTs = dayStart.getTime();
+    const endTs = Date.now();
+
+    const result = await this.store.executeQuery(
+      `SELECT bucket_start AS bucketStart, key_down_count AS keys, mouse_click_count AS clicks, wheel_count AS wheels
+       FROM minute_stats
+       WHERE bucket_start >= ${startTs} AND bucket_start < ${endTs}
+       ORDER BY bucket_start ASC`
+    );
+
+    const buckets = result.rows.map((row) => ({
+      bucketStart: Number(row.bucketStart),
+      keys: Number(row.keys),
+      clicks: Number(row.clicks),
+      wheels: Number(row.wheels)
+    }));
+
+    const todayKeys = buckets.reduce((sum, b) => sum + b.keys, 0);
+    const idlePeriods = findPeriods(buckets, (b) => b.keys < 5, 10);
+    const busyPeriods = findPeriods(buckets, (b) => b.keys > 60, 5);
+
+    return {
+      todayKeys,
+      idlePeriods: idlePeriods.map((p) => ({
+        startTs: p.startTs,
+        endTs: p.endTs,
+        keys: p.keys,
+        label: 'Idle'
+      })),
+      busyPeriods: busyPeriods.map((p) => ({
+        startTs: p.startTs,
+        endTs: p.endTs,
+        keys: p.keys,
+        label: inferBusyLabel(p.keys, p.clicks, p.wheels)
+      })),
+      summary: buildBehaviorSummary(todayKeys, idlePeriods.length, busyPeriods.length)
+    };
+  }
+
+  async updatePetKind(petKind: PetKind): Promise<TrackerConfig> {
+    return this.updateSettings({ petKind } as SettingsPatch & { petKind: PetKind });
+  }
+
   async emitSummary(): Promise<void> {
     this.emit('summary', await this.getSummary());
   }
@@ -265,4 +314,86 @@ export class TrackingController extends EventEmitter {
       }
     }
   }
+}
+
+interface MinuteBucketRow {
+  bucketStart: number;
+  keys: number;
+  clicks: number;
+  wheels: number;
+}
+
+interface PeriodAggregate {
+  startTs: number;
+  endTs: number;
+  keys: number;
+  clicks: number;
+  wheels: number;
+}
+
+function findPeriods(
+  buckets: MinuteBucketRow[],
+  predicate: (b: MinuteBucketRow) => boolean,
+  minLength: number
+): PeriodAggregate[] {
+  const periods: PeriodAggregate[] = [];
+  let current: PeriodAggregate | null = null;
+  const minuteMs = 60 * 1000;
+
+  for (const bucket of buckets) {
+    if (predicate(bucket)) {
+      if (current && bucket.bucketStart - current.endTs <= minuteMs) {
+        current.endTs = bucket.bucketStart + minuteMs;
+        current.keys += bucket.keys;
+        current.clicks += bucket.clicks;
+        current.wheels += bucket.wheels;
+      } else {
+        if (current) {
+          periods.push(current);
+        }
+        current = {
+          startTs: bucket.bucketStart,
+          endTs: bucket.bucketStart + minuteMs,
+          keys: bucket.keys,
+          clicks: bucket.clicks,
+          wheels: bucket.wheels
+        };
+      }
+    } else {
+      if (current) {
+        periods.push(current);
+        current = null;
+      }
+    }
+  }
+  if (current) {
+    periods.push(current);
+  }
+
+  return periods.filter((p) => (p.endTs - p.startTs) / minuteMs >= minLength);
+}
+
+function inferBusyLabel(keys: number, clicks: number, wheels: number): string {
+  if (clicks > keys * 0.6) {
+    return 'Likely browsing/reading (heavy mouse use)';
+  }
+  if (wheels > keys * 0.5) {
+    return 'Likely reading (heavy scroll)';
+  }
+  return 'Likely typing work or chat';
+}
+
+function buildBehaviorSummary(todayKeys: number, idleCount: number, busyCount: number): string {
+  if (todayKeys === 0) {
+    return 'No activity recorded yet today.';
+  }
+  const parts: string[] = [];
+  parts.push(`${todayKeys} keystrokes today`);
+  if (busyCount > 0) {
+    parts.push(`${busyCount} intense typing burst${busyCount > 1 ? 's' : ''}`);
+  }
+  if (idleCount > 0) {
+    parts.push(`${idleCount} idle stretch${idleCount > 1 ? 'es' : ''}`);
+  }
+  return parts.join(' · ');
 }

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
   ActivitySummary,
+  BehaviorAnalysis,
   ChartQueryResult,
   ChatConversation,
   ChatConversationDetail,
@@ -12,6 +13,7 @@ import type {
   SavedChart,
   SettingsPatch,
   StatsDimension,
+  TrackerConfig,
   TrackingState,
   UpdateStatus
 } from '../shared/types';
@@ -28,6 +30,8 @@ const api = {
   stop: (): Promise<TrackingState> => ipcRenderer.invoke('tracker:stop'),
   updateSettings: (patch: SettingsPatch): Promise<ActivitySummary> =>
     ipcRenderer.invoke('tracker:update-settings', patch),
+  getTrackerConfig: (): Promise<TrackerConfig> =>
+    ipcRenderer.invoke('tracker:get-config'),
   executeQuery: (sql: string): Promise<ChartQueryResult> =>
     ipcRenderer.invoke('tracker:execute-query', sql),
   getLlmConfig: (): Promise<LlmConfig | null> =>
@@ -54,6 +58,8 @@ const api = {
     ipcRenderer.invoke('tracker:delete-chat-conversation', id),
   compactChatConversation: (conversationId: string, summaryEntry: ChatEntry, deleteThroughEntryId: string): Promise<void> =>
     ipcRenderer.invoke('tracker:compact-chat-conversation', conversationId, summaryEntry, deleteThroughEntryId),
+  getBehaviorAnalysis: (): Promise<BehaviorAnalysis> =>
+    ipcRenderer.invoke('tracker:get-behavior-analysis'),
   onSummary: (listener: (summary: ActivitySummary) => void): (() => void) => {
     const handler = (_: Electron.IpcRendererEvent, summary: ActivitySummary): void => listener(summary);
     ipcRenderer.on('tracker:summary', handler);

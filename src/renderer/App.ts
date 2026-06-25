@@ -1,6 +1,7 @@
 import './styles.css';
 import type {
   ActivitySummary,
+  BehaviorAnalysis,
   ChatConversation,
   ChatEntry,
   ChartQueryResult,
@@ -8,6 +9,8 @@ import type {
   EventLogPage,
   FrequencyItem,
   LlmConfig,
+  PetKind,
+  PetMood,
   StatsDimension,
   ThemeChoice,
   TrackingState,
@@ -33,6 +36,7 @@ root.innerHTML = `
 
       <nav class="tabs" role="tablist" aria-label="main pages">
         <button class="tab active" data-page="overview">Overview</button>
+        <button class="tab" data-page="pet">Pet</button>
         <button class="tab" data-page="chat">Chat</button>
         <button class="tab" data-page="events">Events</button>
         <button class="tab" data-page="config">Config</button>
@@ -168,6 +172,26 @@ root.innerHTML = `
         </section>
       </section>
 
+      <section class="page" id="petPage">
+        <section class="petPanel">
+          <div class="panelHeader">
+            <span>Desktop Pet</span>
+            <span id="petMoodLabel" class="petMoodLabel">Calm</span>
+          </div>
+          <div class="petStage" id="petStage">
+            <div class="petCreature" id="petCreature" role="button" tabindex="0" aria-label="Click pet for today's behavior analysis">
+              <svg id="petSvg" viewBox="0 0 200 200" class="petSvg" xmlns="http://www.w3.org/2000/svg"></svg>
+            </div>
+            <div class="petStats" id="petStats">
+              <div><b id="petTodayKeys">0</b><span>keys today</span></div>
+              <div><b id="petRate">0</b><span>keys/min (recent)</span></div>
+              <div><b id="petMoodWord">Calm</b><span>current mood</span></div>
+            </div>
+          </div>
+          <div class="petHint">Click the pet for today's behavior analysis.</div>
+        </section>
+      </section>
+
       <section class="page" id="chatPage">
         <section class="chatWorkspace">
           <aside class="chatSidebarPanel" aria-label="chat history">
@@ -241,6 +265,17 @@ root.innerHTML = `
                 <option value="blue">Blue</option>
                 <option value="green">Green</option>
                 <option value="purple">Purple</option>
+              </select>
+            </label>
+            <label class="settingRow">
+              <span>
+                <b>Pet Companion</b>
+                <small>Choose a desktop pet that reacts to your typing.</small>
+              </span>
+              <select id="petKindSelect" class="configInput">
+                <option value="cat">Cat</option>
+                <option value="dog">Dog</option>
+                <option value="fish">Fish</option>
               </select>
             </label>
             <div class="settingRow">
@@ -357,6 +392,18 @@ let refreshInterval = 5000;
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 let cachedHeatmapCounts: Map<string, number> | null = null;
 
+let petKind: PetKind = 'cat';
+let petRecentKeyTs: number[] = [];
+let petMood: PetMood = 'calm';
+let petTickTimer: ReturnType<typeof setInterval> | null = null;
+const petCreature = getEl<HTMLDivElement>('petCreature');
+const petSvg = getEl<SVGSVGElement>('petSvg');
+const petMoodLabel = getEl<HTMLElement>('petMoodLabel');
+const petMoodWord = getEl<HTMLElement>('petMoodWord');
+const petTodayKeys = getEl<HTMLElement>('petTodayKeys');
+const petRate = getEl<HTMLElement>('petRate');
+const petKindSelect = getEl<HTMLSelectElement>('petKindSelect');
+
 type ChatMessageRole = 'user' | 'assistant' | 'system';
 type ProgressStatus = NonNullable<ChatEntry['status']>;
 
@@ -446,11 +493,18 @@ window.tracker.onSummary(renderSummary);
 window.tracker.onTrackingState((state, message) => {
   renderState(state, message);
 });
-window.tracker.onInput(() => {
-  // Stats and event log are refreshed by periodic timer, not on every keystroke
+window.tracker.onInput((event) => {
+  if (event.type === 'key_down') {
+    petRecentKeyTs.push(Date.now());
+    if (petRecentKeyTs.length > 200) {
+      petRecentKeyTs.shift();
+    }
+    updatePetMood();
+  }
 });
 
 void loadLlmConfig();
+void initializePetPage();
 
 getEl<HTMLSelectElement>('refreshInterval').addEventListener('change', function () {
   refreshInterval = Number(this.value);
@@ -539,6 +593,198 @@ async function saveLlmConfig(): Promise<void> {
     accessKey: llmAccessKey.value,
     model: llmModel.value
   });
+}
+
+async function initializePetPage(): Promise<void> {
+  await loadPetKind();
+  petKindSelect.addEventListener('change', () => {
+    petKind = petKindSelect.value as PetKind;
+    void window.tracker.updateSettings({ petKind });
+    renderPet();
+  });
+  petCreature.addEventListener('click', () => void showBehaviorAnalysis());
+  petCreature.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      void showBehaviorAnalysis();
+    }
+  });
+  renderPet();
+  if (petTickTimer === null) {
+    petTickTimer = setInterval(() => {
+      updatePetMood();
+      void refreshPetTodayKeys();
+    }, 5000);
+  }
+}
+
+async function loadPetKind(): Promise<void> {
+  try {
+    const config = await window.tracker.getTrackerConfig();
+    petKind = config.petKind ?? 'cat';
+    petKindSelect.value = petKind;
+  } catch {
+    // defaults
+  }
+  renderPet();
+}
+
+function updatePetMood(): void {
+  const now = Date.now();
+  petRecentKeyTs = petRecentKeyTs.filter((ts) => now - ts < 60_000);
+  const rate = petRecentKeyTs.length;
+  let mood: PetMood = 'calm';
+  if (rate > 120) {
+    mood = 'agitated';
+  } else if (rate > 10) {
+    mood = 'active';
+  }
+  if (mood !== petMood) {
+    petMood = mood;
+    renderPet();
+  }
+  petRate.textContent = String(rate);
+  petMoodWord.textContent = moodLabel(mood);
+  petMoodLabel.textContent = moodLabel(mood);
+}
+
+async function refreshPetTodayKeys(): Promise<void> {
+  try {
+    const analysis = await window.tracker.getBehaviorAnalysis();
+    petTodayKeys.textContent = String(analysis.todayKeys);
+  } catch {
+    // ignore
+  }
+}
+
+function moodLabel(mood: PetMood): string {
+  if (mood === 'agitated') return 'Agitated';
+  if (mood === 'active') return 'Active';
+  return 'Calm';
+}
+
+function renderPet(): void {
+  petSvg.innerHTML = renderPetSvg(petKind, petMood);
+  petCreature.className = `petCreature pet-${petKind} pet-mood-${petMood}`;
+  petMoodLabel.textContent = moodLabel(petMood);
+  petMoodWord.textContent = moodLabel(petMood);
+}
+
+function renderPetSvg(kind: PetKind, mood: PetMood): string {
+  const agitated = mood === 'agitated';
+  const active = mood === 'active';
+  const blush = agitated ? '<ellipse cx="60" cy="115" rx="10" ry="6" fill="#ff8b8b" opacity="0.7"/><ellipse cx="140" cy="115" rx="10" ry="6" fill="#ff8b8b" opacity="0.7"/>' : '';
+  const eyeShape = agitated
+    ? '<path d="M70 90 L90 100 L70 110 Z" fill="#1d1f23"/><path d="M130 90 L110 100 L130 110 Z" fill="#1d1f23"/>'
+    : active
+      ? '<circle cx="75" cy="100" r="6" fill="#1d1f23"/><circle cx="125" cy="100" r="6" fill="#1d1f23"/>'
+      : '<circle cx="75" cy="100" r="8" fill="#1d1f23"/><circle cx="125" cy="100" r="8" fill="#1d1f23"/>';
+  const mouth = agitated
+    ? '<path d="M80 135 Q100 120 120 135" stroke="#1d1f23" stroke-width="3" fill="none" stroke-linecap="round"/>'
+    : mood === 'active'
+      ? '<path d="M85 135 Q100 145 115 135" stroke="#1d1f23" stroke-width="3" fill="none" stroke-linecap="round"/>'
+      : '<path d="M85 132 Q100 142 115 132" stroke="#1d1f23" stroke-width="3" fill="none" stroke-linecap="round"/>';
+
+  if (kind === 'cat') {
+    return `<g class="petBody">
+      <path d="M50 60 L40 35 L70 55 Z" fill="#f2c15c"/><path d="M150 60 L160 35 L130 55 Z" fill="#f2c15c"/>
+      <circle cx="100" cy="100" r="55" fill="#f8d585"/>
+      ${eyeShape}
+      <path d="M95 115 L105 115" stroke="#7a5b2a" stroke-width="3" stroke-linecap="round"/>
+      ${mouth}
+      ${blush}
+      ${agitated ? '<path d="M40 50 L60 70 M160 50 L140 70" stroke="#ff6f7f" stroke-width="3" stroke-linecap="round"/>' : ''}
+    </g>`;
+  }
+  if (kind === 'dog') {
+    return `<g class="petBody">
+      <ellipse cx="60" cy="65" rx="18" ry="28" fill="#b98456"/><ellipse cx="140" cy="65" rx="18" ry="28" fill="#b98456"/>
+      <circle cx="100" cy="105" r="55" fill="#d4a378"/>
+      ${eyeShape}
+      <ellipse cx="100" cy="118" rx="8" ry="6" fill="#1d1f23"/>
+      ${mouth}
+      ${blush}
+      ${agitated ? '<path d="M35 55 L55 75 M165 55 L145 75" stroke="#ff6f7f" stroke-width="3" stroke-linecap="round"/>' : ''}
+    </g>`;
+  }
+  return `<g class="petBody">
+    <ellipse cx="100" cy="110" rx="60" ry="35" fill="#7ab7ff"/>
+    <path d="M40 110 Q60 60 100 60 Q140 60 160 110 Z" fill="#9ec9ff"/>
+    <path d="M125 90 L160 110 L125 110 Z" fill="#9ec9ff"/>
+    ${eyeShape}
+    ${mouth}
+    ${blush}
+    ${agitated ? '<circle cx="100" cy="100" r="60" fill="none" stroke="#ff6f7f" stroke-width="2" stroke-dasharray="4 4"/>' : ''}
+  </g>`;
+}
+
+async function showBehaviorAnalysis(): Promise<void> {
+  let analysis: BehaviorAnalysis;
+  try {
+    analysis = await window.tracker.getBehaviorAnalysis();
+  } catch (error) {
+    analysis = {
+      todayKeys: 0,
+      idlePeriods: [],
+      busyPeriods: [],
+      summary: 'Analysis unavailable right now.'
+    };
+    void error;
+  }
+  const modal = document.createElement('div');
+  modal.className = 'petModal';
+  modal.innerHTML = `
+    <div class="petModalCard">
+      <div class="petModalHeader">
+        <span>Today's Behavior Analysis</span>
+        <button class="petModalClose" aria-label="Close">&times;</button>
+      </div>
+      <div class="petModalSummary">${escapeHtml(analysis.summary)}</div>
+      <div class="petModalSection">
+        <h4>Intense typing bursts</h4>
+        ${analysis.busyPeriods.length === 0
+          ? '<div class="petModalEmpty">None detected yet.</div>'
+          : analysis.busyPeriods.map((p) => `
+            <div class="petPeriodRow">
+              <span class="petPeriodTime">${escapeHtml(formatPeriodTime(p.startTs, p.endTs))}</span>
+              <span class="petPeriodLabel">${escapeHtml(p.label)}</span>
+              <span class="petPeriodKeys">${p.keys} keys</span>
+            </div>`).join('')}
+      </div>
+      <div class="petModalSection">
+        <h4>Idle stretches</h4>
+        ${analysis.idlePeriods.length === 0
+          ? '<div class="petModalEmpty">None detected yet.</div>'
+          : analysis.idlePeriods.slice(0, 5).map((p) => `
+            <div class="petPeriodRow">
+              <span class="petPeriodTime">${escapeHtml(formatPeriodTime(p.startTs, p.endTs))}</span>
+              <span class="petPeriodKeys">${p.keys} keys</span>
+            </div>`).join('')}
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  const close = () => modal.remove();
+  modal.querySelector('.petModalClose')?.addEventListener('click', close);
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) close();
+  });
+  const escHandler = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape') {
+      close();
+      document.removeEventListener('keydown', escHandler);
+    }
+  };
+  document.addEventListener('keydown', escHandler);
+}
+
+function formatPeriodTime(start: number, end: number): string {
+  const fmt = (ts: number): string => {
+    const d = new Date(ts);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
+  const mins = Math.round((end - start) / 60000);
+  return `${fmt(start)} - ${fmt(end)} (${mins}m)`;
 }
 
 async function initializeChatPage(): Promise<void> {
@@ -1669,6 +1915,7 @@ function switchPage(page: string): void {
     button.classList.toggle('active', button.dataset.page === page);
   }
   getEl<HTMLElement>('overviewPage').classList.toggle('active', page === 'overview');
+  getEl<HTMLElement>('petPage').classList.toggle('active', page === 'pet');
   getEl<HTMLElement>('chatPage').classList.toggle('active', page === 'chat');
   getEl<HTMLElement>('eventsPage').classList.toggle('active', page === 'events');
   getEl<HTMLElement>('configPage').classList.toggle('active', page === 'config');
@@ -1677,6 +1924,9 @@ function switchPage(page: string): void {
     startRefreshTimer();
   } else {
     stopRefreshTimer();
+  }
+  if (page === 'pet') {
+    void refreshPetTodayKeys();
   }
 }
 

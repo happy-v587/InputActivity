@@ -10,6 +10,7 @@ import type {
   SavedChart,
   SettingsPatch,
   StatsDimension,
+  TrackerConfig,
   TrackingState
 } from '../shared/types';
 import { UiohookInputCaptureAdapter } from './capture/uiohookAdapter';
@@ -219,6 +220,7 @@ function bindIpc(activeController: TrackingController): void {
     await activeController.updateSettings(patch);
     return activeController.getSummary();
   });
+  ipcMain.handle('tracker:get-config', (): TrackerConfig => activeController.getConfig());
   ipcMain.handle('tracker:execute-query', (_event, sql: string) =>
     activeController.executeQuery(sql)
   );
@@ -259,6 +261,9 @@ function bindIpc(activeController: TrackingController): void {
     'tracker:compact-chat-conversation',
     (_event, conversationId: string, summaryEntry: ChatEntry, deleteThroughEntryId: string) =>
       activeController.compactChatConversation(conversationId, summaryEntry, deleteThroughEntryId)
+  );
+  ipcMain.handle('tracker:get-behavior-analysis', () =>
+    activeController.getBehaviorAnalysis()
   );
   ipcMain.handle('tracker:check-for-updates', () => {
     autoUpdater.checkForUpdates().catch(() => {});

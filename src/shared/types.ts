@@ -17,6 +17,29 @@ export type StatsDimension = 'minute' | 'hour' | 'day' | 'month' | 'year';
 
 export type ThemeChoice = 'dark' | 'light' | 'blue' | 'green' | 'purple';
 
+export type PetKind = 'cat' | 'dog' | 'fish';
+export type PetMood = 'calm' | 'active' | 'agitated';
+
+export interface PetState {
+  mood: PetMood;
+  recentKeysPerMin: number;
+  todayKeys: number;
+}
+
+export interface BehaviorPeriod {
+  startTs: number;
+  endTs: number;
+  keys: number;
+  label: string;
+}
+
+export interface BehaviorAnalysis {
+  todayKeys: number;
+  idlePeriods: BehaviorPeriod[];
+  busyPeriods: BehaviorPeriod[];
+  summary: string;
+}
+
 export type UpdateStatusType = 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error';
 
 export interface UpdateStatus {
@@ -114,6 +137,7 @@ export interface TrackerConfig {
   batchSize: number;
   retentionDays: number | null;
   theme: ThemeChoice;
+  petKind: PetKind;
   timezone: 'local';
 }
 
@@ -132,6 +156,7 @@ export interface SettingsPatch {
   theme?: ThemeChoice;
   idleThresholdMs?: number;
   segmentTailMs?: number;
+  petKind?: PetKind;
 }
 
 export interface LlmConfig {

@@ -8,6 +8,7 @@ export const defaultConfig: TrackerConfig = {
   batchSize: 100,
   retentionDays: 90,
   theme: 'dark',
+  petKind: 'cat',
   timezone: 'local'
 };
 
